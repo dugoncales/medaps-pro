@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx shadcn@latest add button card table badge input select label tabs progress dialog sheet avatar dropdown-menu alert separator --yes)",
+      "Bash(npx shadcn@latest add button card table badge input select label tabs progress dialog sheet avatar dropdown-menu alert separator --overwrite)",
+      "Bash(mkdir -p \"/c/Users/Armanda Gonçales/medaps-pro/supabase/migrations\")",
+      "Bash(mkdir -p \"/c/Users/Armanda Gonçales/medaps-pro/lib/protocolos\")",
+      "Bash(npx tsc *)",
+      "Bash(npm install *)",
+      "Bash(npx shadcn *)",
+      "Bash(npm run *)",
+      "Bash(curl -s \"http://localhost:3000/\")",
+      "Bash(curl -s \"http://localhost:3000/pacientes/pac-joao-silva\")",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(taskkill //PID 22436 //F)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\" http://localhost:3000)",
+      "Bash(taskkill //IM node.exe //F)",
+      "Read(//tmp/**)",
+      "Bash(netstat -ano)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/painel)",
+      "Bash(curl -sL -o /dev/null -w \"após redirect: %{http_code} em %{url_effective}\\\\n\" http://localhost:3000)",
+      "Bash(taskkill /PID 6444 /F)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
