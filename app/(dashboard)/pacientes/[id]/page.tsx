@@ -7,6 +7,7 @@ import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, getConsultasBy
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { JornadaTimeline } from '@/components/jornada/JornadaTimeline'
+import { EvolucaoPROMs } from '@/components/consulta/EvolucaoPROMs'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { AlertaItem } from '@/components/shared/AlertaItem'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -430,7 +431,8 @@ export default function PacientePage() {
         </TabsContent>
 
         {/* Evolução */}
-        <TabsContent value="evolucao" className="pt-4">
+        <TabsContent value="evolucao" className="pt-4 space-y-6">
+          <EvolucaoPROMs consultas={consultas} />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             {evolucaoPAData.length >= 1 && (
               <div className="rounded-xl border border-slate-200 bg-white p-5">

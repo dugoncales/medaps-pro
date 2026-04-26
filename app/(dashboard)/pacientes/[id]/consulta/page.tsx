@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { demoPacientes, demoLinhas, demoConsultas, demoExames, calcularIdade, demoProfissional } from '@/lib/demo-data'
@@ -14,6 +14,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StatusPill } from '@/components/shared/StatusPill'
+import { EscalaICHOM } from '@/components/consulta/EscalaICHOM'
+import { PREMModal, type RespostaPREM } from '@/components/consulta/PREMModal'
+import {
+  ESCALAS, ESCALAS_LIST, calcularResultado, sugerirEscalas,
+  type EscalaCodigo, type ResultadoEscala,
+} from '@/lib/escalas/ichom'
 import { cn } from '@/lib/utils'
 import type { StatusControle } from '@/types'
 
@@ -408,6 +414,8 @@ interface ResumoData {
   retorno_data: Date
   exames_solicitados: string[]
   proximas_acoes: ProximaAcao[]
+  escalas: Partial<Record<EscalaCodigo, ResultadoEscala>>
+  prem?: RespostaPREM
 }
 
 function ResumoJornada({
@@ -532,6 +540,68 @@ function ResumoJornada({
         </div>
       )}
 
+      {/* Escalas ICHOM aplicadas */}
+      {Object.keys(resumo.escalas).length > 0 && (
+        <div className="rounded-xl border border-purple-200 bg-purple-50 p-4 space-y-2">
+          <h3 className="font-semibold text-purple-800 text-sm">📋 Escalas ICHOM aplicadas</h3>
+          <div className="space-y-2">
+            {(Object.entries(resumo.escalas) as [EscalaCodigo, ResultadoEscala][]).map(([cod, res]) => (
+              <div key={cod} className="rounded-lg bg-white border border-purple-100 px-3 py-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-xs font-bold text-purple-700">{ESCALAS[cod].nome}</span>
+                  <span className="text-base font-bold text-slate-800">{res.score}</span>
+                  <span className="text-xs text-slate-500">/ {ESCALAS[cod].scoreRange[1]}</span>
+                  <span className="ml-auto text-xs font-semibold text-slate-700">{res.classificacao}</span>
+                </div>
+                {res.alertas.length > 0 && (
+                  <ul className="mt-1.5 space-y-0.5">
+                    {res.alertas.map((a, i) => (
+                      <li key={i} className={cn(
+                        'text-[11px] font-medium',
+                        a.nivel === 'amarelo' ? 'text-amber-700' :
+                        a.nivel === 'vermelho' ? 'text-red-700' :
+                        'text-red-800',
+                      )}>
+                        {a.nivel === 'vermelho-urgente' ? '🆘' : a.nivel === 'vermelho' ? '🚨' : '⚠️'} {a.mensagem}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* PREM resposta */}
+      {resumo.prem && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <h3 className="font-semibold text-emerald-800 text-sm mb-2">💬 Pesquisa de Experiência (PREM)</h3>
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+            <div>
+              <p className="text-[10px] font-medium uppercase text-emerald-600">NPS</p>
+              <p className="text-xl font-bold text-emerald-700">{resumo.prem.nps}</p>
+            </div>
+            {[
+              { label: 'Acolhimento',     v: resumo.prem.acolhimento },
+              { label: 'Clareza',         v: resumo.prem.clareza },
+              { label: 'Resolutividade',  v: resumo.prem.resolutividade },
+              { label: 'Tempo dedicado',  v: resumo.prem.resposta_tempo },
+            ].map((c) => (
+              <div key={c.label}>
+                <p className="text-[10px] font-medium uppercase text-emerald-600">{c.label}</p>
+                <p className="text-xl font-bold text-emerald-700">{c.v}<span className="text-xs text-emerald-500">/5</span></p>
+              </div>
+            ))}
+          </div>
+          {resumo.prem.comentario && (
+            <p className="mt-2 rounded bg-white border border-emerald-100 px-2 py-1.5 text-xs italic text-slate-600">
+              "{resumo.prem.comentario}"
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Navigation */}
       <div className="flex gap-3 justify-end pt-2">
         <Link
@@ -597,6 +667,7 @@ export default function ConsultaPage() {
 
   const paciente = demoPacientes.find(p => p.id === id)
   const linhasAtivas = demoLinhas.filter(l => l.paciente_id === id && l.status === 'ativo')
+  const protocolosAtivos = linhasAtivas.map(l => l.protocolo_codigo)
 
   const [tipoConsulta, setTipoConsulta] = useState('retorno')
   const [vitais, setVitais] = useState<Vitais>({
@@ -612,6 +683,9 @@ export default function ConsultaPage() {
   const [retornoDias, setRetornoDias] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [resumo, setResumo] = useState<ResumoData | null>(null)
+  const [escalasAtivas, setEscalasAtivas] = useState<EscalaCodigo[]>(() => sugerirEscalas(protocolosAtivos))
+  const [escalasRespostas, setEscalasRespostas] = useState<Partial<Record<EscalaCodigo, Record<string, number>>>>({})
+  const [mostrarPrem, setMostrarPrem] = useState(false)
 
   const imc = calcIMC(vitais.peso, vitais.altura)
   const paAlert = alertaPA(vitais.pa1_s, vitais.pa1_d)
@@ -690,6 +764,18 @@ export default function ConsultaPage() {
       dias_sem_retorno: 0,
     }])
 
+    // Build JSONB escalas (only fully-answered)
+    const escalasJsonb: Partial<Record<EscalaCodigo, ResultadoEscala>> = {}
+    for (const cod of escalasAtivas) {
+      const respostas = escalasRespostas[cod]
+      if (!respostas) continue
+      const def = ESCALAS[cod]
+      const completa = def.perguntas.every(p => respostas[p.id] !== undefined && respostas[p.id] !== null)
+      if (completa) {
+        escalasJsonb[cod] = calcularResultado(cod, respostas)
+      }
+    }
+
     setSalvando(false)
     setResumo({
       jornadas: jornadasResultados.map(r => r.status),
@@ -697,6 +783,33 @@ export default function ConsultaPage() {
       retorno_data: dataRetorno,
       exames_solicitados: examesSolicitados,
       proximas_acoes: proximasAcoes.slice(0, 5),
+      escalas: escalasJsonb,
+    })
+    setMostrarPrem(true)
+  }
+
+  function handlePremSubmit(resp: RespostaPREM) {
+    setResumo(r => r ? { ...r, prem: resp } : r)
+    setMostrarPrem(false)
+  }
+  function handlePremPular() {
+    setMostrarPrem(false)
+  }
+
+  function setEscalaResposta(cod: EscalaCodigo, respostas: Record<string, number>) {
+    setEscalasRespostas(prev => ({ ...prev, [cod]: respostas }))
+  }
+
+  function adicionarEscala(cod: EscalaCodigo) {
+    setEscalasAtivas(prev => prev.includes(cod) ? prev : [...prev, cod])
+  }
+
+  function removerEscala(cod: EscalaCodigo) {
+    setEscalasAtivas(prev => prev.filter(c => c !== cod))
+    setEscalasRespostas(prev => {
+      const next = { ...prev }
+      delete next[cod]
+      return next
     })
   }
 
@@ -706,7 +819,7 @@ export default function ConsultaPage() {
     </div>
   )
 
-  if (resumo) return (
+  if (resumo && !mostrarPrem) return (
     <ResumoJornada
       pacienteNome={paciente!.nome}
       pacienteId={id}
@@ -761,10 +874,11 @@ export default function ConsultaPage() {
       </div>
 
       <Tabs defaultValue="vitais">
-        <TabsList className="grid w-full grid-cols-4 bg-slate-100 p-1 rounded-xl h-auto">
+        <TabsList className="grid w-full grid-cols-5 bg-slate-100 p-1 rounded-xl h-auto">
           {[
             { value: 'vitais', label: '🩺 Sinais Vitais' },
             { value: 'protocolos', label: '📋 Protocolos' },
+            { value: 'proms', label: '📊 PROMs' },
             { value: 'exames', label: '🔬 Exames' },
             { value: 'plano', label: '📝 Plano SOAP' },
           ].map(t => (
@@ -957,6 +1071,65 @@ export default function ConsultaPage() {
           </Tabs>
         </TabsContent>
 
+        {/* Seção 3.5 — PROMs / Escalas ICHOM */}
+        <TabsContent value="proms" className="pt-4">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+              <h3 className="font-semibold text-blue-800 text-sm">📊 Patient-Reported Outcome Measures (PROMs)</h3>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Aplique escalas validadas pelo ICHOM para mensurar desfechos sob a ótica do paciente.
+                Sugestões abaixo são baseadas nos protocolos ativos.
+              </p>
+            </div>
+
+            {/* Picker de escalas */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase text-slate-500 mb-2">Escalas disponíveis</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ESCALAS_LIST.map(def => {
+                  const ativa = escalasAtivas.includes(def.codigo)
+                  const sugerida = def.protocolosRelacionados.some(p => protocolosAtivos.includes(p))
+                  return (
+                    <button
+                      key={def.codigo}
+                      type="button"
+                      onClick={() => ativa ? removerEscala(def.codigo) : adicionarEscala(def.codigo)}
+                      className={cn(
+                        'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                        ativa
+                          ? 'border-blue-500 bg-blue-600 text-white'
+                          : sugerida
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200',
+                      )}
+                      title={def.descricao}
+                    >
+                      {ativa && '✓ '}{def.nome}
+                      {sugerida && !ativa && <span className="ml-1 text-[10px]">·sugerida</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Escalas ativas */}
+            {escalasAtivas.length === 0 && (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+                Selecione uma escala acima para começar.
+              </div>
+            )}
+            {escalasAtivas.map(cod => (
+              <EscalaICHOM
+                key={cod}
+                codigo={cod}
+                respostas={escalasRespostas[cod] ?? {}}
+                onChange={(r) => setEscalaResposta(cod, r)}
+                onRemover={() => removerEscala(cod)}
+              />
+            ))}
+          </div>
+        </TabsContent>
+
         {/* Seção 4 — Exames */}
         <TabsContent value="exames" className="pt-4">
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
@@ -1101,6 +1274,13 @@ export default function ConsultaPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <PREMModal
+        aberto={mostrarPrem}
+        pacienteNome={paciente.nome}
+        onSubmit={handlePremSubmit}
+        onPular={handlePremPular}
+      />
     </div>
   )
 }
