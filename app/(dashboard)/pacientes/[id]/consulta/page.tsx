@@ -1,10 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { demoPacientes, demoLinhas, demoConsultas, demoExames, calcularIdade, demoProfissional } from '@/lib/demo-data'
+import { demoPacientes, demoLinhas, demoConsultas, demoExames, calcularIdade, demoProfissional, IS_DEMO_MODE } from '@/lib/demo-data'
 import { useRuntimeStore } from '@/lib/store/runtime-store'
+import { createClient } from '@/lib/supabase/client'
+import type { Paciente, LinhaCuidado } from '@/types'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { gerarProximasAcoes, urgenciaBadge, contatoIcon, type ProximaAcao } from '@/lib/jornada/proximas-acoes'
@@ -669,8 +671,34 @@ export default function ConsultaPage() {
   const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
   const linhasRuntime = useRuntimeStore((s) => s.linhas)
 
-  const paciente = demoPacientes.find(p => p.id === id) ?? pacientesRuntime.find(p => p.id === id)
-  const linhasAtivas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
+  const [supabasePaciente, setSupabasePaciente] = useState<Paciente | null>(null)
+  const [supabaseLinhas, setSupabaseLinhas] = useState<LinhaCuidado[]>([])
+
+  useEffect(() => {
+    if (IS_DEMO_MODE || !id) return
+    let cancelado = false
+    const supabase = createClient()
+    ;(async () => {
+      const { data: pac, error: errP } = await supabase
+        .from('pacientes').select('*').eq('id', id).maybeSingle()
+      if (errP) console.error('[Consulta] fetch paciente:', errP)
+      const { data: lins, error: errL } = await supabase
+        .from('linhas_cuidado').select('*').eq('paciente_id', id)
+      if (errL) console.error('[Consulta] fetch linhas:', errL)
+      if (!cancelado) {
+        setSupabasePaciente((pac as Paciente | null) ?? null)
+        setSupabaseLinhas((lins ?? []) as LinhaCuidado[])
+      }
+    })()
+    return () => { cancelado = true }
+  }, [id])
+
+  const paciente =
+    supabasePaciente ??
+    demoPacientes.find(p => p.id === id) ??
+    pacientesRuntime.find(p => p.id === id)
+  const linhasAtivas = (supabaseLinhas.length > 0 ? supabaseLinhas : [...demoLinhas, ...linhasRuntime])
+    .filter(l => l.paciente_id === id && l.status === 'ativo')
   const protocolosAtivos = linhasAtivas.map(l => l.protocolo_codigo)
 
   const [tipoConsulta, setTipoConsulta] = useState('retorno')

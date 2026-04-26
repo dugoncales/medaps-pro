@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { PROTOCOLOS } from '@/lib/protocolos'
 import { useRuntimeStore, gerarId } from '@/lib/store/runtime-store'
 import { demoEmpresa, demoProfissional, IS_DEMO_MODE } from '@/lib/demo-data'
+import { createClient } from '@/lib/supabase/client'
 import type { Paciente, LinhaCuidado } from '@/types'
 
 const COMORBIDADES = PROTOCOLOS.map(p => ({ codigo: p.codigo, nome: p.nome, cor: p.cor, icone: p.icone }))
@@ -19,7 +20,15 @@ const COMORBIDADES = PROTOCOLOS.map(p => ({ codigo: p.codigo, nome: p.nome, cor:
 
 const PacienteSchema = z.object({
   nome: z.string().trim().min(3, 'Nome deve ter ao menos 3 caracteres'),
-  data_nascimento: z.string().min(1, 'Data de nascimento é obrigatória'),
+  data_nascimento: z
+    .string()
+    .min(1, 'Data de nascimento é obrigatória')
+    .refine((d) => {
+      const data = new Date(d)
+      if (isNaN(data.getTime())) return false
+      const ano = data.getFullYear()
+      return ano >= 1920 && ano <= new Date().getFullYear()
+    }, 'Data de nascimento inválida (ano deve estar entre 1920 e o ano atual)'),
   sexo: z.enum(['M', 'F', 'O'], { message: 'Selecione o sexo' }),
   matricula: z.string().trim().min(1, 'Matrícula é obrigatória'),
   setor: z.string().optional(),
@@ -57,6 +66,31 @@ const INITIAL: FormState = {
   atividade_fisica: 'sedentario',
 }
 
+// ─── Tradução de códigos de erro Postgres ────────────────────────────────────
+
+interface PgError {
+  code?: string
+  message?: string
+  details?: string
+  hint?: string
+}
+
+function mensagemErroSupabase(err: PgError, contexto: string): string {
+  const code = err.code ?? ''
+  const msg = err.message ?? ''
+  if (code === '23505' || /duplicate key/i.test(msg)) {
+    if (/matricula/i.test(msg)) return 'Matrícula já cadastrada para esta empresa.'
+    return 'Registro duplicado — já existe um item com esses dados únicos.'
+  }
+  if (code === '42501' || /row-level security/i.test(msg)) {
+    return 'Sem permissão para gravar (RLS bloqueou). Verifique se o profissional está vinculado a uma empresa.'
+  }
+  if (code === '23503') return 'Referência inválida (FK): empresa ou profissional não existe.'
+  if (code === '42703') return 'Coluna não existe no schema. Rode as migrations mais recentes.'
+  if (code === 'PGRST116') return 'Registro não encontrado.'
+  return `${contexto}: ${msg || 'erro desconhecido'}${code ? ` (code: ${code})` : ''}`
+}
+
 // ─── Componente ──────────────────────────────────────────────────────────────
 
 export default function NovoPacientePage() {
@@ -83,6 +117,72 @@ export default function NovoPacientePage() {
     }))
   }
 
+  // ─── Garantir que o profissional logado existe na tabela profissionais ───
+  // Se o usuário Auth ainda não tem profissional vinculado, cria um (auto-onboarding)
+  // junto com a primeira empresa disponível (ou uma empresa demo, se nenhuma existir).
+  async function obterOuCriarProfissional(supabase: ReturnType<typeof createClient>, userId: string, userEmail: string | null) {
+    const { data: existente, error: errSel } = await supabase
+      .from('profissionais')
+      .select('id, empresa_id')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (errSel && errSel.code !== 'PGRST116') {
+      console.error('[NovoPaciente] erro buscando profissional:', errSel)
+      throw new Error(mensagemErroSupabase(errSel, 'Buscar profissional'))
+    }
+    if (existente) return existente
+
+    // Profissional não existe — buscar (ou criar) empresa
+    const { data: empresa, error: errEmp } = await supabase
+      .from('empresas')
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+
+    let empresaId = empresa?.id as string | undefined
+
+    if (errEmp && errEmp.code !== 'PGRST116') {
+      console.error('[NovoPaciente] erro buscando empresa:', errEmp)
+      throw new Error(mensagemErroSupabase(errEmp, 'Buscar empresa'))
+    }
+
+    if (!empresaId) {
+      const { data: novaEmpresa, error: errNovaEmp } = await supabase
+        .from('empresas')
+        .insert({
+          nome: 'Empresa Demonstração',
+          cnpj: '00.000.000/0001-00',
+          total_colaboradores: 0,
+        })
+        .select('id')
+        .single()
+      if (errNovaEmp || !novaEmpresa) {
+        console.error('[NovoPaciente] erro criando empresa demo:', errNovaEmp)
+        throw new Error(mensagemErroSupabase(errNovaEmp ?? {}, 'Criar empresa demonstração'))
+      }
+      empresaId = novaEmpresa.id
+    }
+
+    const { data: novoProf, error: errIns } = await supabase
+      .from('profissionais')
+      .insert({
+        user_id: userId,
+        nome: userEmail ?? 'Profissional',
+        cargo: 'medico',
+        empresa_id: empresaId,
+        ativo: true,
+      })
+      .select('id, empresa_id')
+      .single()
+
+    if (errIns || !novoProf) {
+      console.error('[NovoPaciente] erro criando profissional:', errIns)
+      throw new Error(mensagemErroSupabase(errIns ?? {}, 'Criar profissional'))
+    }
+    return novoProf
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setErroGeral(null)
@@ -105,30 +205,25 @@ export default function NovoPacientePage() {
     setSalvando(true)
 
     try {
-      // Empresa do profissional logado — em demo usamos a empresa fixa.
-      const empresa_id = demoEmpresa.id
-      if (!empresa_id) throw new Error('Empresa do profissional não encontrada (RLS bloquearia o insert).')
-
-      const pacienteId = gerarId('pac')
-      const agora = new Date().toISOString()
-
-      const novoPaciente: Paciente = {
-        id: pacienteId,
-        empresa_id,
-        matricula: dados.matricula,
-        nome: dados.nome,
-        data_nascimento: dados.data_nascimento,
-        sexo: dados.sexo,
-        setor: dados.setor || undefined,
-        comorbidades: dados.comorbidades,
-        medicamentos_uso: dados.medicamentos_uso || undefined,
-        tabagismo_status: dados.tabagismo_status,
-        tabagismo_macos_ano: dados.tabagismo_macos_ano ? Number(dados.tabagismo_macos_ano) : undefined,
-        ativo: true,
-        created_at: agora,
-      }
-
+      // ─── Modo demo (sem Supabase configurado) ─────────────────────────
       if (IS_DEMO_MODE) {
+        const pacienteId = gerarId('pac')
+        const agora = new Date().toISOString()
+        const novoPaciente: Paciente = {
+          id: pacienteId,
+          empresa_id: demoEmpresa.id,
+          matricula: dados.matricula,
+          nome: dados.nome,
+          data_nascimento: dados.data_nascimento,
+          sexo: dados.sexo,
+          setor: dados.setor || undefined,
+          comorbidades: dados.comorbidades,
+          medicamentos_uso: dados.medicamentos_uso || undefined,
+          tabagismo_status: dados.tabagismo_status,
+          tabagismo_macos_ano: dados.tabagismo_macos_ano ? Number(dados.tabagismo_macos_ano) : undefined,
+          ativo: true,
+          created_at: agora,
+        }
         adicionarPaciente(novoPaciente)
         for (const codigo of dados.comorbidades) {
           const linha: LinhaCuidado = {
@@ -143,14 +238,92 @@ export default function NovoPacientePage() {
           }
           adicionarLinha(linha)
         }
-      } else {
-        // TODO Supabase: inserir paciente, depois linhas_cuidado em batch.
-        // Inclui empresa_id (necessário para RLS) e profissional_id.
-        // Em caso de erro, capturamos a mensagem e mostramos no banner.
-        throw new Error('Persistência Supabase ainda não implementada.')
+        router.push(`/pacientes/${pacienteId}`)
+        return
       }
 
-      router.push(`/pacientes/${pacienteId}`)
+      // ─── Modo Supabase real ───────────────────────────────────────────
+      const supabase = createClient()
+
+      // a) Usuário autenticado
+      const { data: { user }, error: errUser } = await supabase.auth.getUser()
+      if (errUser || !user) {
+        console.error('[NovoPaciente] sem usuário autenticado:', errUser)
+        throw new Error('Sessão expirada. Faça login novamente.')
+      }
+
+      // b) Profissional + empresa (auto-cria se faltar)
+      const profissional = await obterOuCriarProfissional(supabase, user.id, user.email ?? null)
+
+      // c) Inserir paciente — apenas colunas que existem no schema
+      const tabagismoMacos = dados.tabagismo_macos_ano ? Number(dados.tabagismo_macos_ano) : null
+      const { data: novoPaciente, error: errPac } = await supabase
+        .from('pacientes')
+        .insert({
+          empresa_id: profissional.empresa_id,
+          matricula: dados.matricula,
+          nome: dados.nome,
+          data_nascimento: dados.data_nascimento,
+          sexo: dados.sexo,
+          setor: dados.setor || null,
+          comorbidades: dados.comorbidades,
+          medicamentos_uso: dados.medicamentos_uso || null,
+          tabagismo_status: dados.tabagismo_status,
+          tabagismo_macos_ano: tabagismoMacos,
+          ativo: true,
+        })
+        .select('id')
+        .single()
+
+      if (errPac || !novoPaciente) {
+        console.error('[NovoPaciente] erro inserindo paciente:', errPac)
+        throw new Error(mensagemErroSupabase(errPac ?? {}, 'Inserir paciente'))
+      }
+
+      // d) Linhas de cuidado — uma por comorbidade marcada
+      const linhasInseridas: LinhaCuidado[] = []
+      if (dados.comorbidades.length > 0) {
+        const linhasInsert = dados.comorbidades.map((codigo) => ({
+          paciente_id: novoPaciente.id,
+          protocolo_codigo: codigo,
+          status: 'ativo' as const,
+          nivel_gravidade: 'parcial' as const,
+          profissional_id: profissional.id,
+        }))
+        const { data: linhasData, error: errLin } = await supabase
+          .from('linhas_cuidado')
+          .insert(linhasInsert)
+          .select()
+        if (errLin) {
+          console.error('[NovoPaciente] erro inserindo linhas_cuidado:', errLin)
+          setErroGeral(`Paciente criado, mas ${dados.comorbidades.length} linha(s) de cuidado falharam: ${mensagemErroSupabase(errLin, 'Linhas de cuidado')}`)
+          setTimeout(() => router.push(`/pacientes/${novoPaciente.id}`), 2000)
+          return
+        }
+        linhasInseridas.push(...(linhasData ?? []))
+      }
+
+      // Cache local — write-through para o store, garante UI imediata
+      // após o redirect (sem esperar nova rodada de fetch ao Supabase).
+      adicionarPaciente({
+        id: novoPaciente.id,
+        empresa_id: profissional.empresa_id,
+        matricula: dados.matricula,
+        nome: dados.nome,
+        data_nascimento: dados.data_nascimento,
+        sexo: dados.sexo,
+        setor: dados.setor || undefined,
+        comorbidades: dados.comorbidades,
+        medicamentos_uso: dados.medicamentos_uso || undefined,
+        tabagismo_status: dados.tabagismo_status,
+        tabagismo_macos_ano: tabagismoMacos ?? undefined,
+        ativo: true,
+        created_at: new Date().toISOString(),
+      })
+      for (const l of linhasInseridas) adicionarLinha(l)
+
+      // e) Sucesso → redireciona para o perfil do paciente novo
+      router.push(`/pacientes/${novoPaciente.id}`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Erro desconhecido'
       console.error('[NovoPaciente] erro ao salvar:', err)
@@ -199,6 +372,8 @@ export default function NovoPacientePage() {
               <Label>Data de Nascimento *</Label>
               <Input
                 type="date"
+                min="1920-01-01"
+                max={new Date().toISOString().split('T')[0]}
                 value={form.data_nascimento}
                 onChange={e => update('data_nascimento', e.target.value)}
                 className="mt-1"

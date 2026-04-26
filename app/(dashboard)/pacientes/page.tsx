@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
-import { demoPacientes, demoLinhas, demoConsultas, calcularIdade, getControleGeral, getProximoRetorno } from '@/lib/demo-data'
+import { demoPacientes, demoLinhas, demoConsultas, calcularIdade, getControleGeral, getProximoRetorno, IS_DEMO_MODE } from '@/lib/demo-data'
 import { useRuntimeStore } from '@/lib/store/runtime-store'
+import { createClient } from '@/lib/supabase/client'
+import type { Paciente, LinhaCuidado } from '@/types'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { Input } from '@/components/ui/input'
@@ -30,8 +32,49 @@ export default function PacientesPage() {
   const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
   const linhasRuntime = useRuntimeStore((s) => s.linhas)
 
-  const todosPacientes = useMemo(() => [...demoPacientes, ...pacientesRuntime], [pacientesRuntime])
-  const todasLinhas = useMemo(() => [...demoLinhas, ...linhasRuntime], [linhasRuntime])
+  const [supabasePacientes, setSupabasePacientes] = useState<Paciente[]>([])
+  const [supabaseLinhas, setSupabaseLinhas] = useState<LinhaCuidado[]>([])
+
+  useEffect(() => {
+    if (IS_DEMO_MODE) return
+    const supabase = createClient()
+    let cancelado = false
+    ;(async () => {
+      const { data: pacs, error: errP } = await supabase
+        .from('pacientes')
+        .select('*')
+        .eq('ativo', true)
+      if (errP) { console.error('[Pacientes] fetch:', errP); return }
+      const { data: lins, error: errL } = await supabase
+        .from('linhas_cuidado')
+        .select('*')
+        .eq('status', 'ativo')
+      if (errL) { console.error('[Pacientes] fetch linhas:', errL); return }
+      if (!cancelado) {
+        setSupabasePacientes((pacs ?? []) as Paciente[])
+        setSupabaseLinhas((lins ?? []) as LinhaCuidado[])
+      }
+    })()
+    return () => { cancelado = true }
+  }, [])
+
+  // Dedup: se o Supabase já trouxer um paciente também presente no store local
+  // (write-through cache do cadastro), preferimos a versão Supabase.
+  const todosPacientes = useMemo(() => {
+    const idsSupabase = new Set(supabasePacientes.map((p) => p.id))
+    const runtime = pacientesRuntime.filter((p) => !idsSupabase.has(p.id))
+    return IS_DEMO_MODE
+      ? [...demoPacientes, ...runtime]
+      : [...supabasePacientes, ...runtime]
+  }, [pacientesRuntime, supabasePacientes])
+
+  const todasLinhas = useMemo(() => {
+    const idsSupabase = new Set(supabaseLinhas.map((l) => l.id))
+    const runtime = linhasRuntime.filter((l) => !idsSupabase.has(l.id))
+    return IS_DEMO_MODE
+      ? [...demoLinhas, ...runtime]
+      : [...supabaseLinhas, ...runtime]
+  }, [linhasRuntime, supabaseLinhas])
 
   const rows = useMemo(() => {
     return todosPacientes

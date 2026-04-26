@@ -3,9 +3,11 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, demoProfissional, getConsultasByPaciente, getExamesByPaciente, getAlertasByPaciente, calcularIdade } from '@/lib/demo-data'
+import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, demoProfissional, getConsultasByPaciente, getExamesByPaciente, getAlertasByPaciente, calcularIdade, IS_DEMO_MODE } from '@/lib/demo-data'
 import { useRuntimeStore } from '@/lib/store/runtime-store'
+import { createClient } from '@/lib/supabase/client'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
+import type { Paciente, LinhaCuidado } from '@/types'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { JornadaTimeline } from '@/components/jornada/JornadaTimeline'
 import { EvolucaoPROMs } from '@/components/consulta/EvolucaoPROMs'
@@ -214,24 +216,42 @@ export default function PacientePage() {
   const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
   const linhasRuntime = useRuntimeStore((s) => s.linhas)
 
-  const paciente = demoPacientes.find(p => p.id === id) ?? pacientesRuntime.find(p => p.id === id)
+  const [supabasePaciente, setSupabasePaciente] = useState<Paciente | null>(null)
+  const [supabaseLinhas, setSupabaseLinhas] = useState<LinhaCuidado[]>([])
+  const [carregandoPaciente, setCarregandoPaciente] = useState(!IS_DEMO_MODE)
 
-  if (!paciente) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center text-slate-500">
-        Paciente não encontrado.
-      </div>
-    )
-  }
+  useEffect(() => {
+    if (IS_DEMO_MODE || !id) return
+    let cancelado = false
+    const supabase = createClient()
+    ;(async () => {
+      const { data: pac, error: errP } = await supabase
+        .from('pacientes')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle()
+      if (errP) console.error('[Paciente] fetch:', errP)
 
-  const linhas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
-  const consultas = getConsultasByPaciente(id)
+      const { data: lins, error: errL } = await supabase
+        .from('linhas_cuidado')
+        .select('*')
+        .eq('paciente_id', id)
+      if (errL) console.error('[Paciente] fetch linhas:', errL)
 
-  // Compute jornadas async on mount
+      if (!cancelado) {
+        setSupabasePaciente((pac as Paciente | null) ?? null)
+        setSupabaseLinhas((lins ?? []) as LinhaCuidado[])
+        setCarregandoPaciente(false)
+      }
+    })()
+    return () => { cancelado = true }
+  }, [id])
+
+  // Compute jornadas async on mount (sempre chamado para respeitar rules-of-hooks)
   useEffect(() => {
     if (!id) return
     setJornadasCarregando(true)
-    const linhasAtivas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
+    const linhasAtivas = [...demoLinhas, ...linhasRuntime, ...supabaseLinhas].filter(l => l.paciente_id === id && l.status === 'ativo')
     const historicoConsultas = demoConsultas.filter(c => c.paciente_id === id)
     const historicoExames = getExamesByPaciente(id)
 
@@ -253,7 +273,31 @@ export default function PacientePage() {
       setJornadas(results)
       setJornadasCarregando(false)
     })
-  }, [id, linhasRuntime])
+  }, [id, linhasRuntime, supabaseLinhas])
+
+  const paciente =
+    supabasePaciente ??
+    demoPacientes.find(p => p.id === id) ??
+    pacientesRuntime.find(p => p.id === id)
+
+  if (!paciente) {
+    if (carregandoPaciente) {
+      return (
+        <div className="flex min-h-[400px] items-center justify-center text-sm text-slate-400">
+          <span className="animate-spin mr-2">⏳</span> Carregando paciente…
+        </div>
+      )
+    }
+    return (
+      <div className="flex min-h-[400px] items-center justify-center text-slate-500">
+        Paciente não encontrado.
+      </div>
+    )
+  }
+
+  const linhas = (supabaseLinhas.length > 0 ? supabaseLinhas : [...demoLinhas, ...linhasRuntime])
+    .filter(l => l.paciente_id === id && l.status === 'ativo')
+  const consultas = getConsultasByPaciente(id)
   const exames = getExamesByPaciente(id)
   const alertas = getAlertasByPaciente(id)
   const idade = calcularIdade(paciente.data_nascimento)
