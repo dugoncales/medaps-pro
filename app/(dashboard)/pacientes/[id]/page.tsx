@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, getConsultasByPaciente, getExamesByPaciente, getAlertasByPaciente, calcularIdade } from '@/lib/demo-data'
+import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, demoProfissional, getConsultasByPaciente, getExamesByPaciente, getAlertasByPaciente, calcularIdade } from '@/lib/demo-data'
+import { useRuntimeStore } from '@/lib/store/runtime-store'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { JornadaTimeline } from '@/components/jornada/JornadaTimeline'
 import { EvolucaoPROMs } from '@/components/consulta/EvolucaoPROMs'
+import { HistoricoEscalas } from '@/components/consulta/HistoricoEscalas'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { AlertaItem } from '@/components/shared/AlertaItem'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -209,7 +211,10 @@ export default function PacientePage() {
   const [jornadas, setJornadas] = useState<StatusJornada[]>([])
   const [jornadasCarregando, setJornadasCarregando] = useState(true)
 
-  const paciente = demoPacientes.find(p => p.id === id)
+  const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
+  const linhasRuntime = useRuntimeStore((s) => s.linhas)
+
+  const paciente = demoPacientes.find(p => p.id === id) ?? pacientesRuntime.find(p => p.id === id)
 
   if (!paciente) {
     return (
@@ -219,14 +224,14 @@ export default function PacientePage() {
     )
   }
 
-  const linhas = demoLinhas.filter(l => l.paciente_id === id && l.status === 'ativo')
+  const linhas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
   const consultas = getConsultasByPaciente(id)
 
   // Compute jornadas async on mount
   useEffect(() => {
     if (!id) return
     setJornadasCarregando(true)
-    const linhasAtivas = demoLinhas.filter(l => l.paciente_id === id && l.status === 'ativo')
+    const linhasAtivas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
     const historicoConsultas = demoConsultas.filter(c => c.paciente_id === id)
     const historicoExames = getExamesByPaciente(id)
 
@@ -248,7 +253,7 @@ export default function PacientePage() {
       setJornadas(results)
       setJornadasCarregando(false)
     })
-  }, [id])
+  }, [id, linhasRuntime])
   const exames = getExamesByPaciente(id)
   const alertas = getAlertasByPaciente(id)
   const idade = calcularIdade(paciente.data_nascimento)
@@ -314,8 +319,8 @@ export default function PacientePage() {
 
       {/* Tabs */}
       <Tabs defaultValue="resumo">
-        <TabsList className="w-full justify-start border-b border-slate-200 bg-transparent rounded-none p-0 gap-0">
-          {['resumo', 'jornada', 'consultas', 'evolucao', 'exames', 'alertas'].map(tab => (
+        <TabsList className="w-full justify-start border-b border-slate-200 bg-transparent rounded-none p-0 gap-0 flex-wrap h-auto">
+          {['resumo', 'jornada', 'consultas', 'evolucao', 'escalas', 'exames', 'alertas'].map(tab => (
             <TabsTrigger
               key={tab}
               value={tab}
@@ -325,6 +330,7 @@ export default function PacientePage() {
                tab === 'jornada' ? '🗺️ Jornada' :
                tab === 'consultas' ? 'Consultas' :
                tab === 'evolucao' ? 'Evolução' :
+               tab === 'escalas' ? '📊 Escalas' :
                tab === 'exames' ? 'Exames' : 'Alertas'}
             </TabsTrigger>
           ))}
@@ -472,6 +478,17 @@ export default function PacientePage() {
               </p>
             )}
           </div>
+        </TabsContent>
+
+        {/* Escalas */}
+        <TabsContent value="escalas" className="pt-4">
+          <HistoricoEscalas
+            pacienteId={id}
+            pacienteNome={paciente.nome}
+            protocolosAtivos={linhas.map(l => l.protocolo_codigo)}
+            consultas={consultas}
+            profissionalNome={demoProfissional.nome}
+          />
         </TabsContent>
 
         {/* Exames */}

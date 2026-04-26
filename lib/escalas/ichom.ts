@@ -11,15 +11,23 @@
 
 export type EscalaCodigo =
   | 'PHQ9'
+  | 'PHQ2'
   | 'GAD7'
   | 'EQ5D5L'
   | 'HIT6'
   | 'CAT'
+  | 'MMRC'
+  | 'ACQ5'
   | 'ESS'
+  | 'STOPBANG'
   | 'AUDITC'
+  | 'AUDIT'
   | 'FAGERSTROM'
   | 'IIEF5'
   | 'EVA_DOR'
+  | 'WHO5'
+  | 'EPDS'
+  | 'DLQI'
 
 export type NivelAlerta = 'amarelo' | 'vermelho' | 'vermelho-urgente'
 
@@ -621,25 +629,561 @@ const EVA_DOR: DefinicaoEscala = {
   },
 }
 
+// ─── PHQ-2 (rastreio curto de depressão) ─────────────────────────────────────
+
+const PHQ2: DefinicaoEscala = {
+  codigo: 'PHQ2',
+  nome: 'PHQ-2',
+  descricao: 'Rastreio rápido de depressão (2 itens)',
+  protocolosRelacionados: ['CHK', 'SM'],
+  scoreRange: [0, 6],
+  perguntas: [
+    'Pouco interesse ou pouco prazer em fazer as coisas',
+    'Sentir-se desanimado(a), deprimido(a) ou sem perspectiva',
+  ].map((texto, i) => ({
+    id: `p${i + 1}`,
+    texto,
+    tipo: 'opcoes' as const,
+    opcoes: LIKERT_PHQ_GAD,
+  })),
+  calcularScore: (r) => somar(r, ['p1', 'p2']),
+  classificar: (score) => (score >= 3 ? 'Rastreio positivo — aplicar PHQ-9' : 'Rastreio negativo'),
+  gerarAlertas: (score) =>
+    score >= 3
+      ? [{
+          nivel: 'amarelo',
+          mensagem: 'PHQ-2 positivo (≥ 3)',
+          recomendacao: 'Aplicar PHQ-9 completo para confirmar e estratificar a depressão.',
+        }]
+      : [],
+}
+
+// ─── WHO-5 ───────────────────────────────────────────────────────────────────
+
+const WHO5_OPCOES: Opcao[] = [
+  { valor: 0, label: 'Em nenhum momento' },
+  { valor: 1, label: 'Algumas vezes' },
+  { valor: 2, label: 'Menos da metade do tempo' },
+  { valor: 3, label: 'Mais da metade do tempo' },
+  { valor: 4, label: 'A maior parte do tempo' },
+  { valor: 5, label: 'Todo o tempo' },
+]
+
+const WHO5: DefinicaoEscala = {
+  codigo: 'WHO5',
+  nome: 'WHO-5',
+  descricao: 'Índice de Bem-Estar (últimas 2 semanas) — 0–100',
+  protocolosRelacionados: ['DM', 'OBE', 'SME', 'SM'],
+  scoreRange: [0, 100],
+  perguntas: [
+    'Tenho me sentido alegre e de bom humor',
+    'Tenho me sentido calmo(a) e relaxado(a)',
+    'Tenho me sentido ativo(a) e com vigor',
+    'Acordei me sentindo descansado(a) e revigorado(a)',
+    'Meu dia a dia tem sido cheio de coisas que me interessam',
+  ].map((texto, i) => ({
+    id: `p${i + 1}`,
+    texto,
+    tipo: 'opcoes' as const,
+    opcoes: WHO5_OPCOES,
+  })),
+  calcularScore: (r) => somar(r, ['p1', 'p2', 'p3', 'p4', 'p5']) * 4,
+  classificar: (score) => {
+    if (score >= 75) return 'Excelente bem-estar'
+    if (score >= 50) return 'Bom bem-estar'
+    if (score >= 28) return 'Bem-estar reduzido'
+    return 'Possível depressão — aplicar PHQ-9'
+  },
+  gerarAlertas: (score) => {
+    if (score < 28) return [{
+      nivel: 'vermelho',
+      mensagem: `WHO-5 ≤ 28/100 — possível depressão`,
+      recomendacao: 'Aplicar PHQ-9 e considerar encaminhamento.',
+    }]
+    if (score < 50) return [{
+      nivel: 'amarelo',
+      mensagem: 'Bem-estar reduzido (WHO-5 < 50)',
+      recomendacao: 'Investigar causas, aplicar rastreio adicional se persistente.',
+    }]
+    return []
+  },
+}
+
+// ─── mMRC (dispneia) ──────────────────────────────────────────────────────────
+
+const MMRC: DefinicaoEscala = {
+  codigo: 'MMRC',
+  nome: 'mMRC',
+  descricao: 'Modified Medical Research Council — escala de dispneia (0–4)',
+  protocolosRelacionados: ['DPC', 'ASM'],
+  scoreRange: [0, 4],
+  perguntas: [{
+    id: 'p1',
+    texto: 'Qual a frase que melhor descreve sua falta de ar?',
+    tipo: 'opcoes',
+    opcoes: [
+      { valor: 0, label: 'Só tenho falta de ar com exercício intenso' },
+      { valor: 1, label: 'Tenho falta de ar quando ando rápido ou subo aclive leve' },
+      { valor: 2, label: 'Ando mais devagar que pessoas da mesma idade ou paro para respirar' },
+      { valor: 3, label: 'Paro para respirar após andar ~100 m' },
+      { valor: 4, label: 'Tenho falta de ar para sair de casa, me vestir ou me despir' },
+    ],
+  }],
+  calcularScore: (r) => r['p1'] ?? 0,
+  classificar: (score) => {
+    if (score === 0) return 'Sem dispneia significativa'
+    if (score === 1) return 'Dispneia leve'
+    if (score === 2) return 'Dispneia moderada'
+    if (score === 3) return 'Dispneia grave'
+    return 'Dispneia muito grave'
+  },
+  gerarAlertas: (score) => {
+    if (score >= 3) return [{
+      nivel: 'vermelho',
+      mensagem: `Dispneia grave (mMRC ${score})`,
+      recomendacao: 'Reavaliar GOLD-ABE, otimizar broncodilatadores, indicar reabilitação pulmonar e oxigenoterapia se SpO₂ baixa.',
+    }]
+    if (score === 2) return [{
+      nivel: 'amarelo',
+      mensagem: 'Dispneia moderada (mMRC 2)',
+      recomendacao: 'Otimizar terapia inalatória.',
+    }]
+    return []
+  },
+}
+
+// ─── ACQ-5 (controle de asma) ─────────────────────────────────────────────────
+
+const ACQ5_OPCOES: Opcao[] = [
+  { valor: 0, label: 'Nunca' },
+  { valor: 1, label: 'Quase nunca' },
+  { valor: 2, label: 'Algumas vezes' },
+  { valor: 3, label: 'Várias vezes' },
+  { valor: 4, label: 'Muitas vezes' },
+  { valor: 5, label: 'A maior parte do tempo' },
+  { valor: 6, label: 'O tempo todo' },
+]
+
+const ACQ5: DefinicaoEscala = {
+  codigo: 'ACQ5',
+  nome: 'ACQ-5',
+  descricao: 'Asthma Control Questionnaire — controle da asma (média 0–6)',
+  protocolosRelacionados: ['ASM'],
+  scoreRange: [0, 6],
+  perguntas: [
+    'Com que frequência você acordou à noite por causa da asma?',
+    'Quão graves foram seus sintomas asmáticos ao acordar de manhã?',
+    'O quanto suas atividades foram limitadas pela asma?',
+    'O quanto você teve falta de ar pela asma?',
+    'Com que frequência você teve chiado no peito?',
+  ].map((texto, i) => ({
+    id: `p${i + 1}`,
+    texto,
+    tipo: 'opcoes' as const,
+    opcoes: ACQ5_OPCOES,
+  })),
+  calcularScore: (r) => {
+    const ids = ['p1', 'p2', 'p3', 'p4', 'p5']
+    const respondidas = ids.filter((id) => r[id] !== undefined)
+    if (respondidas.length === 0) return 0
+    const media = somar(r, respondidas) / respondidas.length
+    return Math.round(media * 100) / 100
+  },
+  classificar: (score) => {
+    if (score < 0.75) return 'Asma bem controlada'
+    if (score < 1.5) return 'Zona cinzenta — vigilância'
+    return 'Asma não controlada'
+  },
+  gerarAlertas: (score) => {
+    if (score >= 1.5) return [{
+      nivel: 'vermelho',
+      mensagem: `Asma não controlada (ACQ-5 ${score.toFixed(2)})`,
+      recomendacao: 'Escalonar terapia (Step-up GINA), revisar técnica inalatória e adesão.',
+    }]
+    if (score >= 0.75) return [{
+      nivel: 'amarelo',
+      mensagem: `Controle limítrofe (ACQ-5 ${score.toFixed(2)})`,
+      recomendacao: 'Reforçar adesão e técnica inalatória.',
+    }]
+    return []
+  },
+}
+
+// ─── STOP-BANG ───────────────────────────────────────────────────────────────
+
+const STOPBANG_SIM_NAO: Opcao[] = [
+  { valor: 1, label: 'Sim' },
+  { valor: 0, label: 'Não' },
+]
+
+const STOPBANG: DefinicaoEscala = {
+  codigo: 'STOPBANG',
+  nome: 'STOP-BANG',
+  descricao: 'Rastreio de SAOS (8 questões dicotômicas)',
+  protocolosRelacionados: ['SAO'],
+  scoreRange: [0, 8],
+  perguntas: [
+    'S — Você ronca alto (mais alto que a fala ou audível através de portas fechadas)?',
+    'T — Sente-se cansado(a), com fadiga ou sonolência diurna frequente?',
+    'O — Alguém já observou que você para de respirar ou engasga durante o sono?',
+    'P — Você tem ou está em tratamento para hipertensão arterial?',
+    'B — IMC > 35 kg/m²?',
+    'A — Idade > 50 anos?',
+    'N — Circunferência cervical > 40 cm?',
+    'G — Sexo masculino?',
+  ].map((texto, i) => ({
+    id: `p${i + 1}`,
+    texto,
+    tipo: 'opcoes' as const,
+    opcoes: STOPBANG_SIM_NAO,
+  })),
+  calcularScore: (r) => somar(r, Array.from({ length: 8 }, (_, i) => `p${i + 1}`)),
+  classificar: (score) => {
+    if (score <= 2) return 'Risco baixo de SAOS'
+    if (score <= 4) return 'Risco intermediário de SAOS'
+    return 'Risco alto de SAOS'
+  },
+  gerarAlertas: (score) => {
+    if (score >= 5) return [{
+      nivel: 'vermelho',
+      mensagem: `Alto risco de SAOS (STOP-BANG ${score})`,
+      recomendacao: 'Solicitar polissonografia. Avaliar segurança ao dirigir / operar máquinas.',
+    }]
+    if (score >= 3) return [{
+      nivel: 'amarelo',
+      mensagem: `Risco intermediário de SAOS (STOP-BANG ${score})`,
+      recomendacao: 'Considerar polissonografia conforme contexto clínico.',
+    }]
+    return []
+  },
+}
+
+// ─── AUDIT (10 itens) ─────────────────────────────────────────────────────────
+
+const AUDIT: DefinicaoEscala = {
+  codigo: 'AUDIT',
+  nome: 'AUDIT',
+  descricao: 'Alcohol Use Disorders Identification Test — 10 itens',
+  protocolosRelacionados: ['ALC'],
+  scoreRange: [0, 40],
+  perguntas: [
+    {
+      id: 'p1', texto: 'Com que frequência você consome bebidas alcoólicas?',
+      tipo: 'opcoes',
+      opcoes: [
+        { valor: 0, label: 'Nunca' },
+        { valor: 1, label: 'Mensalmente ou menos' },
+        { valor: 2, label: '2–4 vezes/mês' },
+        { valor: 3, label: '2–3 vezes/semana' },
+        { valor: 4, label: '4 ou mais vezes/semana' },
+      ],
+    },
+    {
+      id: 'p2', texto: 'Quantas doses num dia comum em que está bebendo?',
+      tipo: 'opcoes',
+      opcoes: [
+        { valor: 0, label: '1 ou 2' }, { valor: 1, label: '3 ou 4' },
+        { valor: 2, label: '5 ou 6' }, { valor: 3, label: '7 a 9' },
+        { valor: 4, label: '10 ou mais' },
+      ],
+    },
+    {
+      id: 'p3', texto: 'Com que frequência você consome 6+ doses em uma única ocasião?',
+      tipo: 'opcoes',
+      opcoes: [
+        { valor: 0, label: 'Nunca' }, { valor: 1, label: 'Menos que mensalmente' },
+        { valor: 2, label: 'Mensalmente' }, { valor: 3, label: 'Semanalmente' },
+        { valor: 4, label: 'Diariamente / quase' },
+      ],
+    },
+    ...(['Com que frequência você não conseguiu parar de beber depois de começar?',
+        'Com que frequência deixou de fazer algo importante por causa do álcool?',
+        'Com que frequência precisou beber pela manhã para se recuperar?',
+        'Com que frequência sentiu culpa ou remorso após beber?',
+        'Com que frequência não lembrou da noite anterior por ter bebido?'] as const).map((texto, idx) => ({
+      id: `p${idx + 4}`,
+      texto,
+      tipo: 'opcoes' as const,
+      opcoes: [
+        { valor: 0, label: 'Nunca' }, { valor: 1, label: 'Menos que mensalmente' },
+        { valor: 2, label: 'Mensalmente' }, { valor: 3, label: 'Semanalmente' },
+        { valor: 4, label: 'Diariamente / quase' },
+      ],
+    })),
+    {
+      id: 'p9', texto: 'Você ou alguém já se machucou por causa de você beber?',
+      tipo: 'opcoes',
+      opcoes: [
+        { valor: 0, label: 'Não' },
+        { valor: 2, label: 'Sim, mas não no último ano' },
+        { valor: 4, label: 'Sim, no último ano' },
+      ],
+    },
+    {
+      id: 'p10', texto: 'Algum familiar, amigo ou profissional já se preocupou com seu consumo de álcool?',
+      tipo: 'opcoes',
+      opcoes: [
+        { valor: 0, label: 'Não' },
+        { valor: 2, label: 'Sim, mas não no último ano' },
+        { valor: 4, label: 'Sim, no último ano' },
+      ],
+    },
+  ],
+  calcularScore: (r) => somar(r, Array.from({ length: 10 }, (_, i) => `p${i + 1}`)),
+  classificar: (score) => {
+    if (score <= 7) return 'Consumo de baixo risco'
+    if (score <= 15) return 'Uso de risco'
+    if (score <= 19) return 'Uso nocivo / dependência provável'
+    return 'Provável dependência grave'
+  },
+  gerarAlertas: (score) => {
+    if (score >= 20) return [{
+      nivel: 'vermelho',
+      mensagem: `Dependência alcoólica provável (AUDIT ${score})`,
+      recomendacao: 'Encaminhar para serviço especializado (CAPS-AD). Avaliar farmacoterapia (Naltrexona, Acamprosato).',
+    }]
+    if (score >= 16) return [{
+      nivel: 'vermelho',
+      mensagem: `Uso nocivo / provável dependência (AUDIT ${score})`,
+      recomendacao: 'Iniciar abordagem motivacional intensiva e considerar farmacoterapia.',
+    }]
+    if (score >= 8) return [{
+      nivel: 'amarelo',
+      mensagem: `Consumo de risco (AUDIT ${score})`,
+      recomendacao: 'Aconselhamento breve estruturado.',
+    }]
+    return []
+  },
+}
+
+// ─── EPDS (Edinburgh Postnatal Depression Scale) ──────────────────────────────
+
+const EPDS: DefinicaoEscala = {
+  codigo: 'EPDS',
+  nome: 'EPDS',
+  descricao: 'Edinburgh Postnatal Depression Scale — depressão perinatal',
+  protocolosRelacionados: ['MUL'],
+  scoreRange: [0, 30],
+  perguntas: [
+    {
+      id: 'p1', texto: 'Tenho conseguido rir e ver o lado divertido das coisas',
+      opcoes: [
+        { valor: 0, label: 'Tanto quanto antes' }, { valor: 1, label: 'Não tanto quanto antes' },
+        { valor: 2, label: 'Sem dúvida menos que antes' }, { valor: 3, label: 'Não, de jeito nenhum' },
+      ],
+    },
+    {
+      id: 'p2', texto: 'Tenho olhado para o futuro com prazer',
+      opcoes: [
+        { valor: 0, label: 'Tanto quanto antes' }, { valor: 1, label: 'Menos que antes' },
+        { valor: 2, label: 'Sem dúvida menos' }, { valor: 3, label: 'Quase nada' },
+      ],
+    },
+    {
+      id: 'p3', texto: 'Tenho me culpado sem motivo quando algo dá errado',
+      opcoes: [
+        { valor: 3, label: 'Sim, na maioria das vezes' }, { valor: 2, label: 'Sim, algumas vezes' },
+        { valor: 1, label: 'Quase não' }, { valor: 0, label: 'Não, nunca' },
+      ],
+    },
+    {
+      id: 'p4', texto: 'Tenho me sentido ansiosa(o) ou preocupada(o) sem motivo',
+      opcoes: [
+        { valor: 0, label: 'Não, de jeito nenhum' }, { valor: 1, label: 'Quase nunca' },
+        { valor: 2, label: 'Sim, às vezes' }, { valor: 3, label: 'Sim, com frequência' },
+      ],
+    },
+    {
+      id: 'p5', texto: 'Tenho me sentido com medo ou em pânico sem motivo',
+      opcoes: [
+        { valor: 3, label: 'Sim, bastante' }, { valor: 2, label: 'Sim, às vezes' },
+        { valor: 1, label: 'Não muito' }, { valor: 0, label: 'Não, de jeito nenhum' },
+      ],
+    },
+    {
+      id: 'p6', texto: 'As coisas têm me sobrecarregado',
+      opcoes: [
+        { valor: 3, label: 'Quase sempre não consigo lidar' }, { valor: 2, label: 'Às vezes não tenho lidado bem' },
+        { valor: 1, label: 'Quase sempre tenho lidado bem' }, { valor: 0, label: 'Lido tão bem quanto sempre' },
+      ],
+    },
+    {
+      id: 'p7', texto: 'Tenho me sentido tão infeliz que tenho dificuldade para dormir',
+      opcoes: [
+        { valor: 3, label: 'Quase sempre' }, { valor: 2, label: 'Às vezes' },
+        { valor: 1, label: 'Quase nunca' }, { valor: 0, label: 'Não, nunca' },
+      ],
+    },
+    {
+      id: 'p8', texto: 'Tenho me sentido triste ou pra baixo',
+      opcoes: [
+        { valor: 3, label: 'Quase sempre' }, { valor: 2, label: 'Frequentemente' },
+        { valor: 1, label: 'Quase nunca' }, { valor: 0, label: 'Não, nunca' },
+      ],
+    },
+    {
+      id: 'p9', texto: 'Tenho me sentido tão infeliz que tenho chorado',
+      opcoes: [
+        { valor: 3, label: 'Quase sempre' }, { valor: 2, label: 'Frequentemente' },
+        { valor: 1, label: 'Só às vezes' }, { valor: 0, label: 'Não, nunca' },
+      ],
+    },
+    {
+      id: 'p10', texto: 'A ideia de me ferir tem passado pela minha cabeça',
+      opcoes: [
+        { valor: 3, label: 'Sim, muitas vezes' }, { valor: 2, label: 'Às vezes' },
+        { valor: 1, label: 'Quase nunca' }, { valor: 0, label: 'Não, nunca' },
+      ],
+    },
+  ].map((p) => ({ ...p, tipo: 'opcoes' as const })),
+  calcularScore: (r) => somar(r, Array.from({ length: 10 }, (_, i) => `p${i + 1}`)),
+  classificar: (score) => {
+    if (score < 10) return 'Baixa probabilidade de depressão'
+    if (score < 13) return 'Sintomas depressivos significativos'
+    return 'Provável depressão perinatal'
+  },
+  gerarAlertas: (score, r) => {
+    const alertas: AlertaEscala[] = []
+    if ((r['p10'] ?? 0) > 0) {
+      alertas.push({
+        nivel: 'vermelho-urgente',
+        mensagem: 'Risco de autoextermínio (EPDS item 10 > 0)',
+        recomendacao: 'Avaliação imediata. Considerar encaminhamento ao CAPS / emergência.',
+      })
+    }
+    if (score >= 13) {
+      alertas.push({
+        nivel: 'vermelho',
+        mensagem: `Provável depressão perinatal (EPDS ${score})`,
+        recomendacao: 'Iniciar abordagem (psicoterapia ± farmacoterapia compatível com lactação).',
+      })
+    } else if (score >= 10) {
+      alertas.push({
+        nivel: 'amarelo',
+        mensagem: `Sintomas depressivos perinatais (EPDS ${score})`,
+        recomendacao: 'Monitorar e considerar acompanhamento psicológico.',
+      })
+    }
+    return alertas
+  },
+}
+
+// ─── DLQI (Dermatology Life Quality Index) ────────────────────────────────────
+
+const DLQI_OPCOES: Opcao[] = [
+  { valor: 0, label: 'Não / Não relevante' },
+  { valor: 1, label: 'Um pouco' },
+  { valor: 2, label: 'Bastante' },
+  { valor: 3, label: 'Muito' },
+]
+
+const DLQI: DefinicaoEscala = {
+  codigo: 'DLQI',
+  nome: 'DLQI',
+  descricao: 'Dermatology Life Quality Index — impacto da pele na qualidade de vida (última semana)',
+  protocolosRelacionados: ['DRM'],
+  scoreRange: [0, 30],
+  perguntas: [
+    'Quanto sua pele coçou, doeu ou ardeu?',
+    'Quanto sua pele te deixou constrangido(a)?',
+    'Quanto sua pele atrapalhou compras / cuidados com a casa ou jardim?',
+    'Quanto sua pele influenciou as roupas que você usou?',
+    'Quanto sua pele afetou suas atividades sociais ou lazer?',
+    'Quanto sua pele dificultou esportes?',
+    'Sua pele te impediu de trabalhar ou estudar?',
+    'Quanto sua pele criou problemas com parceiros, amigos ou familiares?',
+    'Quanto sua pele causou dificuldades sexuais?',
+    'Quanto o tratamento da pele tem sido um problema (sujeira, tempo)?',
+  ].map((texto, i) => ({
+    id: `p${i + 1}`,
+    texto,
+    tipo: 'opcoes' as const,
+    opcoes: DLQI_OPCOES,
+  })),
+  calcularScore: (r) => somar(r, Array.from({ length: 10 }, (_, i) => `p${i + 1}`)),
+  classificar: (score) => {
+    if (score <= 1) return 'Sem impacto'
+    if (score <= 5) return 'Pequeno impacto'
+    if (score <= 10) return 'Impacto moderado'
+    if (score <= 20) return 'Impacto muito grande'
+    return 'Impacto extremamente grande'
+  },
+  gerarAlertas: (score) => {
+    if (score > 10) return [{
+      nivel: 'amarelo',
+      mensagem: `DLQI ${score} — impacto significativo na qualidade de vida`,
+      recomendacao: 'Reavaliar diagnóstico e escalonar terapia tópica/sistêmica.',
+    }]
+    return []
+  },
+}
+
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 export const ESCALAS: Record<EscalaCodigo, DefinicaoEscala> = {
-  PHQ9, GAD7, EQ5D5L, HIT6, CAT, ESS, AUDITC, FAGERSTROM, IIEF5, EVA_DOR,
+  PHQ9, PHQ2, GAD7, EQ5D5L, HIT6, CAT, MMRC, ACQ5, ESS, STOPBANG,
+  AUDITC, AUDIT, FAGERSTROM, IIEF5, EVA_DOR, WHO5, EPDS, DLQI,
 }
 
 export const ESCALAS_LIST: DefinicaoEscala[] = Object.values(ESCALAS)
 
-// Sugere escalas a aplicar baseado nos protocolos ativos do paciente
-export function sugerirEscalas(protocolosAtivos: string[]): EscalaCodigo[] {
-  const sugeridas = new Set<EscalaCodigo>()
-  for (const def of ESCALAS_LIST) {
-    if (def.protocolosRelacionados.some((p) => protocolosAtivos.includes(p))) {
-      sugeridas.add(def.codigo)
+// ─── Mapa Protocolo → Escalas (com flag obrigatória) ─────────────────────────
+//
+// Para cada protocolo ativo, indica quais escalas ICHOM devem ser oferecidas
+// ao profissional, e quais são clinicamente obrigatórias para o conjunto
+// padrão definido pelo ICHOM.
+
+export interface EscalaSugestao {
+  codigo: EscalaCodigo
+  obrigatoria: boolean
+  motivo: string  // protocolo ou indicação que originou a sugestão
+}
+
+const PROTOCOLO_ESCALAS: Record<string, Array<{ codigo: EscalaCodigo; obrigatoria: boolean }>> = {
+  HAS:  [{ codigo: 'EQ5D5L',     obrigatoria: true }],
+  DM:   [{ codigo: 'EQ5D5L',     obrigatoria: true }, { codigo: 'WHO5', obrigatoria: false }],
+  TAG:  [{ codigo: 'GAD7',       obrigatoria: true }, { codigo: 'PHQ9', obrigatoria: false }],
+  SM:   [{ codigo: 'PHQ9',       obrigatoria: true }, { codigo: 'GAD7', obrigatoria: true }],
+  DPC:  [{ codigo: 'CAT',        obrigatoria: true }, { codigo: 'MMRC', obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  ASM:  [{ codigo: 'ACQ5',       obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  SAO:  [{ codigo: 'ESS',        obrigatoria: true }, { codigo: 'STOPBANG', obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  TAB:  [{ codigo: 'FAGERSTROM', obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  ALC:  [{ codigo: 'AUDITC',     obrigatoria: true }, { codigo: 'AUDIT', obrigatoria: false }, { codigo: 'PHQ9', obrigatoria: false }],
+  CEF:  [{ codigo: 'HIT6',       obrigatoria: true }, { codigo: 'EVA_DOR', obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  LOM:  [{ codigo: 'EVA_DOR',    obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  GOT:  [{ codigo: 'EVA_DOR',    obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  HOM:  [{ codigo: 'IIEF5',      obrigatoria: false }, { codigo: 'PHQ9', obrigatoria: false }, { codigo: 'AUDITC', obrigatoria: false }],
+  MUL:  [{ codigo: 'EPDS',       obrigatoria: false }, { codigo: 'PHQ9', obrigatoria: false }, { codigo: 'EQ5D5L', obrigatoria: false }],
+  OBE:  [{ codigo: 'EQ5D5L',     obrigatoria: true }, { codigo: 'WHO5', obrigatoria: false }],
+  DIS:  [{ codigo: 'EQ5D5L',     obrigatoria: true }],
+  HIP:  [{ codigo: 'EQ5D5L',     obrigatoria: true }],
+  SME:  [{ codigo: 'EQ5D5L',     obrigatoria: true }, { codigo: 'WHO5', obrigatoria: false }],
+  DRM:  [{ codigo: 'DLQI',       obrigatoria: false }, { codigo: 'EVA_DOR', obrigatoria: false }],
+  CHK:  [{ codigo: 'PHQ2',       obrigatoria: true }, { codigo: 'AUDITC', obrigatoria: true }, { codigo: 'EQ5D5L', obrigatoria: false }],
+}
+
+// Devolve a lista deduplicada de escalas a oferecer para o conjunto de
+// protocolos ativos. Para a mesma escala, prevalece a marcação "obrigatória"
+// quando ao menos um dos protocolos a exigir.
+export function getEscalasParaProtocolos(protocolosAtivos: string[]): EscalaSugestao[] {
+  const map = new Map<EscalaCodigo, EscalaSugestao>()
+  for (const cod of protocolosAtivos) {
+    const itens = PROTOCOLO_ESCALAS[cod] ?? []
+    for (const item of itens) {
+      const existente = map.get(item.codigo)
+      if (!existente) {
+        map.set(item.codigo, { codigo: item.codigo, obrigatoria: item.obrigatoria, motivo: cod })
+      } else if (item.obrigatoria && !existente.obrigatoria) {
+        map.set(item.codigo, { ...existente, obrigatoria: true, motivo: cod })
+      }
     }
   }
-  // EQ-5D-5L é genérico — aplica em qualquer paciente com protocolo crônico
-  if (protocolosAtivos.length > 0) sugeridas.add('EQ5D5L')
-  return Array.from(sugeridas)
+  return Array.from(map.values())
+}
+
+// Mantido por compat — devolve só os códigos
+export function sugerirEscalas(protocolosAtivos: string[]): EscalaCodigo[] {
+  return getEscalasParaProtocolos(protocolosAtivos).map((e) => e.codigo)
 }
 
 // Calcula resultado completo para uma escala

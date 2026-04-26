@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { demoPacientes, demoLinhas, demoConsultas, demoExames, calcularIdade, demoProfissional } from '@/lib/demo-data'
+import { useRuntimeStore } from '@/lib/store/runtime-store'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { gerarProximasAcoes, urgenciaBadge, contatoIcon, type ProximaAcao } from '@/lib/jornada/proximas-acoes'
@@ -17,8 +18,8 @@ import { StatusPill } from '@/components/shared/StatusPill'
 import { EscalaICHOM } from '@/components/consulta/EscalaICHOM'
 import { PREMModal, type RespostaPREM } from '@/components/consulta/PREMModal'
 import {
-  ESCALAS, ESCALAS_LIST, calcularResultado, sugerirEscalas,
-  type EscalaCodigo, type ResultadoEscala,
+  ESCALAS, ESCALAS_LIST, calcularResultado, getEscalasParaProtocolos,
+  type EscalaCodigo, type ResultadoEscala, type EscalaSugestao,
 } from '@/lib/escalas/ichom'
 import { cn } from '@/lib/utils'
 import type { StatusControle } from '@/types'
@@ -665,8 +666,11 @@ export default function ConsultaPage() {
   const router = useRouter()
   const id = params.id as string
 
-  const paciente = demoPacientes.find(p => p.id === id)
-  const linhasAtivas = demoLinhas.filter(l => l.paciente_id === id && l.status === 'ativo')
+  const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
+  const linhasRuntime = useRuntimeStore((s) => s.linhas)
+
+  const paciente = demoPacientes.find(p => p.id === id) ?? pacientesRuntime.find(p => p.id === id)
+  const linhasAtivas = [...demoLinhas, ...linhasRuntime].filter(l => l.paciente_id === id && l.status === 'ativo')
   const protocolosAtivos = linhasAtivas.map(l => l.protocolo_codigo)
 
   const [tipoConsulta, setTipoConsulta] = useState('retorno')
@@ -683,8 +687,11 @@ export default function ConsultaPage() {
   const [retornoDias, setRetornoDias] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [resumo, setResumo] = useState<ResumoData | null>(null)
-  const [escalasAtivas, setEscalasAtivas] = useState<EscalaCodigo[]>(() => sugerirEscalas(protocolosAtivos))
+  const sugestoes: EscalaSugestao[] = getEscalasParaProtocolos(protocolosAtivos)
+  const sugestoesMap = new Map(sugestoes.map((s) => [s.codigo, s]))
+  const [escalasAtivas, setEscalasAtivas] = useState<EscalaCodigo[]>(() => sugestoes.map((s) => s.codigo))
   const [escalasRespostas, setEscalasRespostas] = useState<Partial<Record<EscalaCodigo, Record<string, number>>>>({})
+  const [mostrarMaisEscalas, setMostrarMaisEscalas] = useState(false)
   const [mostrarPrem, setMostrarPrem] = useState(false)
 
   const imc = calcIMC(vitais.peso, vitais.altura)
@@ -1077,39 +1084,90 @@ export default function ConsultaPage() {
             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
               <h3 className="font-semibold text-blue-800 text-sm">📊 Patient-Reported Outcome Measures (PROMs)</h3>
               <p className="text-xs text-blue-600 mt-0.5">
-                Aplique escalas validadas pelo ICHOM para mensurar desfechos sob a ótica do paciente.
-                Sugestões abaixo são baseadas nos protocolos ativos.
+                Escalas filtradas pelos protocolos ativos do paciente
+                {protocolosAtivos.length > 0 && (
+                  <> ({protocolosAtivos.join(' · ')})</>
+                )}.
+                Itens marcados como <span className="font-semibold">Obrigatória</span> compõem o conjunto padrão ICHOM.
               </p>
             </div>
 
-            {/* Picker de escalas */}
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase text-slate-500 mb-2">Escalas disponíveis</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ESCALAS_LIST.map(def => {
-                  const ativa = escalasAtivas.includes(def.codigo)
-                  const sugerida = def.protocolosRelacionados.some(p => protocolosAtivos.includes(p))
-                  return (
-                    <button
-                      key={def.codigo}
-                      type="button"
-                      onClick={() => ativa ? removerEscala(def.codigo) : adicionarEscala(def.codigo)}
-                      className={cn(
-                        'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
-                        ativa
-                          ? 'border-blue-500 bg-blue-600 text-white'
-                          : sugerida
-                            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                            : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200',
-                      )}
-                      title={def.descricao}
-                    >
-                      {ativa && '✓ '}{def.nome}
-                      {sugerida && !ativa && <span className="ml-1 text-[10px]">·sugerida</span>}
-                    </button>
-                  )
-                })}
+            {/* Sugestões clínicas */}
+            {sugestoes.length === 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Nenhum protocolo ativo possui escala obrigatória. Use o botão abaixo para aplicar uma escala manualmente, se desejar.
               </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase text-slate-500 mb-2">
+                  Escalas sugeridas pelos protocolos ({sugestoes.length})
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {sugestoes.map((s) => {
+                    const def = ESCALAS[s.codigo]
+                    const ativa = escalasAtivas.includes(s.codigo)
+                    return (
+                      <button
+                        key={s.codigo}
+                        type="button"
+                        onClick={() => ativa ? removerEscala(s.codigo) : adicionarEscala(s.codigo)}
+                        className={cn(
+                          'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors flex items-center gap-1.5',
+                          ativa
+                            ? 'border-blue-500 bg-blue-600 text-white'
+                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
+                        )}
+                        title={`${def.descricao} · indicado por ${s.motivo}`}
+                      >
+                        {ativa && '✓'}
+                        <span>{def.nome}</span>
+                        {s.obrigatoria && (
+                          <span className={cn(
+                            'rounded px-1 py-px text-[9px] font-bold uppercase',
+                            ativa ? 'bg-white/20 text-white' : 'bg-red-100 text-red-700',
+                          )}>
+                            Obrigatória
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Adicionar outras escalas */}
+            <div className="rounded-xl border border-dashed border-slate-200 bg-white p-3">
+              <button
+                type="button"
+                onClick={() => setMostrarMaisEscalas((v) => !v)}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+              >
+                {mostrarMaisEscalas ? '− Ocultar' : '+ Adicionar outra escala'} (caso clínico específico)
+              </button>
+              {mostrarMaisEscalas && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {ESCALAS_LIST.filter((def) => !sugestoesMap.has(def.codigo)).map((def) => {
+                    const ativa = escalasAtivas.includes(def.codigo)
+                    return (
+                      <button
+                        key={def.codigo}
+                        type="button"
+                        onClick={() => ativa ? removerEscala(def.codigo) : adicionarEscala(def.codigo)}
+                        className={cn(
+                          'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                          ativa
+                            ? 'border-blue-500 bg-blue-600 text-white'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200',
+                        )}
+                        title={def.descricao}
+                      >
+                        {ativa && '✓ '}{def.nome}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Escalas ativas */}

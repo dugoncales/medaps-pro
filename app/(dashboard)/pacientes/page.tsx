@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { demoPacientes, demoLinhas, demoConsultas, calcularIdade, getControleGeral, getProximoRetorno } from '@/lib/demo-data'
+import { useRuntimeStore } from '@/lib/store/runtime-store'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { Input } from '@/components/ui/input'
@@ -26,13 +27,19 @@ export default function PacientesPage() {
   const [filtroStatus, setFiltroStatus] = useState<StatusControle | ''>('')
   const [pagina, setPagina] = useState(1)
 
+  const pacientesRuntime = useRuntimeStore((s) => s.pacientes)
+  const linhasRuntime = useRuntimeStore((s) => s.linhas)
+
+  const todosPacientes = useMemo(() => [...demoPacientes, ...pacientesRuntime], [pacientesRuntime])
+  const todasLinhas = useMemo(() => [...demoLinhas, ...linhasRuntime], [linhasRuntime])
+
   const rows = useMemo(() => {
-    return demoPacientes
+    return todosPacientes
       .filter(p => {
         const q = busca.toLowerCase()
         if (q && !p.nome.toLowerCase().includes(q) && !p.matricula.toLowerCase().includes(q)) return false
 
-        const linhasPac = demoLinhas.filter(l => l.paciente_id === p.id && l.status === 'ativo')
+        const linhasPac = todasLinhas.filter(l => l.paciente_id === p.id && l.status === 'ativo')
         if (filtroProtocolo && !linhasPac.some(l => l.protocolo_codigo === filtroProtocolo)) return false
 
         if (filtroStatus) {
@@ -44,7 +51,7 @@ export default function PacientesPage() {
         return true
       })
       .map(p => {
-        const linhas = demoLinhas.filter(l => l.paciente_id === p.id && l.status === 'ativo')
+        const linhas = todasLinhas.filter(l => l.paciente_id === p.id && l.status === 'ativo')
         const consultas = demoConsultas.filter(c => c.paciente_id === p.id)
         const controle = getControleGeral(linhas)
         const ultima = consultas.sort((a, b) => new Date(b.data_consulta).getTime() - new Date(a.data_consulta).getTime())[0]
@@ -53,12 +60,12 @@ export default function PacientesPage() {
         const status: StatusControle = controle.pct >= 80 ? 'controlado' : controle.pct >= 50 ? 'parcial' : 'descontrolado'
         return { p, linhas, ultima, proximo, retornoStatus, controle, status }
       })
-  }, [busca, filtroProtocolo, filtroStatus])
+  }, [busca, filtroProtocolo, filtroStatus, todosPacientes, todasLinhas])
 
   const totalPaginas = Math.ceil(rows.length / ROWS_PER_PAGE)
   const paginados = rows.slice((pagina - 1) * ROWS_PER_PAGE, pagina * ROWS_PER_PAGE)
 
-  const protocoosUnicos = [...new Set(demoLinhas.map(l => l.protocolo_codigo))]
+  const protocoosUnicos = [...new Set(todasLinhas.map(l => l.protocolo_codigo))]
 
   return (
     <div className="space-y-4">
@@ -66,7 +73,7 @@ export default function PacientesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Pacientes</h1>
-          <p className="text-sm text-slate-500">{demoPacientes.length} colaboradores em linha de cuidado</p>
+          <p className="text-sm text-slate-500">{todosPacientes.length} colaboradores em linha de cuidado</p>
         </div>
         <Link href="/pacientes/novo">
           <Button className="gap-2 bg-blue-600 hover:bg-blue-500">
