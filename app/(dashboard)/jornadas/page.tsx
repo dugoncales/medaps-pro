@@ -142,44 +142,51 @@ export default async function JornadasPage() {
             {acaoImediata.map((acao, i) => {
               const badge = urgenciaBadge(acao.urgencia)
               const prazo = prazoBadge(acao.prazo)
+              const borderCor = acao.urgencia >= 5 ? '#DC2626' : '#D97706'
+              const btnCor = acao.urgencia >= 5 ? '#DC2626' : '#1E40AF'
+              const btnHover = acao.urgencia >= 5 ? '#B91C1C' : '#1E3A8A'
               return (
                 <div
                   key={i}
-                  className="rounded-xl border-2 border-red-200 bg-red-50 p-4 shadow-sm flex flex-col gap-3"
+                  className="group rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] flex flex-col gap-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.07),0_2px_4px_-1px_rgba(0,0,0,0.05)]"
+                  style={{ borderLeft: `4px solid ${borderCor}` }}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-bold text-slate-800">{acao.paciente_nome}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#111827] truncate">{acao.paciente_nome}</p>
+                      <div className="flex items-center gap-1.5 mt-1">
                         {(() => {
                           const p = PROTOCOLO_MAP.get(acao.protocolo)
                           return (
                             <span
-                              className="rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
-                              style={{ backgroundColor: p?.cor ?? '#6b7280' }}
+                              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                              style={{ backgroundColor: p?.cor ?? '#6B7280' }}
                             >
                               {acao.protocolo}
                             </span>
                           )
                         })()}
-                        <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', badge.className)}>
+                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', badge.className)}>
                           {badge.label}
                         </span>
                       </div>
                     </div>
-                    <span className="text-lg shrink-0">{contatoIcon(acao.tipo_contato)}</span>
+                    <span className="text-lg shrink-0 leading-none">{contatoIcon(acao.tipo_contato)}</span>
                   </div>
 
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">{acao.acao}</p>
-                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{acao.motivo}</p>
+                    <p className="text-sm font-semibold text-[#111827] leading-snug">{acao.acao}</p>
+                    <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">{acao.motivo}</p>
                   </div>
 
-                  <div className="flex items-center justify-between mt-auto">
+                  <div className="flex items-center justify-between mt-auto pt-1">
                     <span className={cn('text-xs font-semibold', prazo.className)}>{prazo.label}</span>
                     <Link
                       href={`/pacientes/${acao.paciente_id}/consulta`}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500 transition-colors"
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                      style={{ backgroundColor: btnCor }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = btnHover)}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = btnCor)}
                     >
                       Atender Agora →
                     </Link>
@@ -206,10 +213,10 @@ export default async function JornadasPage() {
             Nenhuma ação pendente para esta semana.
           </div>
         ) : (
-          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50 text-xs font-semibold uppercase text-slate-400">
+                <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-[11px] font-semibold uppercase tracking-[0.06em] text-[#6B7280]">
                   <th className="px-4 py-3 text-left">Paciente</th>
                   <th className="px-4 py-3 text-left">Protocolo</th>
                   <th className="px-4 py-3 text-left">Próxima Ação</th>
@@ -218,38 +225,37 @@ export default async function JornadasPage() {
                   <th className="px-4 py-3 text-left"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-[#F1F5F9]">
                 {estaSemana.slice(0, 20).map((acao, i) => {
-                  const badge = urgenciaBadge(acao.urgencia)
                   const prazo = prazoBadge(acao.prazo)
                   const p = PROTOCOLO_MAP.get(acao.protocolo)
                   return (
-                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                    <tr key={i} className="hover:bg-[#F9FAFB] transition-colors">
                       <td className="px-4 py-3">
                         <Link
                           href={`/pacientes/${acao.paciente_id}`}
-                          className="font-medium text-slate-800 hover:text-blue-600 transition-colors"
+                          className="font-medium text-[#111827] hover:text-[#1E40AF] transition-colors"
                         >
                           {acao.paciente_nome}
                         </Link>
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className="inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
-                          style={{ backgroundColor: p?.cor ?? '#6b7280' }}
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                          style={{ backgroundColor: p?.cor ?? '#6B7280' }}
                         >
                           {acao.protocolo}
                         </span>
                       </td>
                       <td className="px-4 py-3 max-w-xs">
-                        <p className="font-medium text-slate-700 truncate">{acao.acao}</p>
-                        <p className="text-xs text-slate-400 truncate">{acao.motivo}</p>
+                        <p className="font-medium text-[#111827] truncate">{acao.acao}</p>
+                        <p className="text-xs text-[#9CA3AF] truncate">{acao.motivo}</p>
                       </td>
                       <td className="px-4 py-3">
                         <span className={cn('text-xs font-semibold', prazo.className)}>{prazo.label}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="flex items-center gap-1 text-xs text-slate-500">
+                        <span className="flex items-center gap-1.5 text-xs text-[#6B7280]">
                           {contatoIcon(acao.tipo_contato)}
                           <span className="hidden sm:inline">
                             {{ consulta_presencial: 'Presencial', telefonema: 'Ligar', whatsapp: 'WhatsApp', email: 'E-mail' }[acao.tipo_contato]}
@@ -259,7 +265,7 @@ export default async function JornadasPage() {
                       <td className="px-4 py-3">
                         <Link
                           href={`/pacientes/${acao.paciente_id}`}
-                          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                          className="rounded px-2 py-1 text-xs font-semibold text-[#1E40AF] hover:bg-[#EFF6FF] transition-colors"
                         >
                           Ver →
                         </Link>
@@ -289,7 +295,7 @@ export default async function JornadasPage() {
             const maxStep = Math.max(...steps, 1)
 
             return (
-              <div key={codigo} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div key={codigo} className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.07),0_2px_4px_-1px_rgba(0,0,0,0.05)]">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-xl">{proto!.icone}</span>

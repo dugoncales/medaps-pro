@@ -7,23 +7,24 @@ interface StatusPillProps {
   className?: string
 }
 
-const CONFIG: Record<StatusControle, { label: string; className: string }> = {
-  controlado: { label: 'Controlado', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  parcial:    { label: 'Parcial',    className: 'bg-amber-100 text-amber-800 border-amber-200' },
-  descontrolado: { label: 'Descontrolado', className: 'bg-red-100 text-red-800 border-red-200' },
+const CONFIG: Record<StatusControle, { label: string; className: string; dot: string }> = {
+  controlado:    { label: 'Controlado',    className: 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]', dot: 'bg-[#059669]' },
+  parcial:       { label: 'Parcial',       className: 'bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]', dot: 'bg-[#D97706]' },
+  descontrolado: { label: 'Descontrolado', className: 'bg-[#FEF2F2] text-[#991B1B] border-[#FECACA]', dot: 'bg-[#DC2626]' },
 }
 
 export function StatusPill({ status, size = 'md', className }: StatusPillProps) {
-  const { label, className: colorClass } = CONFIG[status]
+  const { label, className: colorClass, dot } = CONFIG[status]
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border font-medium',
-        size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-2.5 py-1 text-xs',
+        'inline-flex items-center gap-1.5 rounded-full border font-semibold',
+        size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',
         colorClass,
-        className
+        className,
       )}
     >
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
       {label}
     </span>
   )
