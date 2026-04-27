@@ -7,9 +7,32 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-heading: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  /* ─── MedAPS Pro — Design Tokens (Premium Corporativo) ────────────────── */
+  --color-brand-deep:   #0A2540;  /* navy primary */
+  --color-brand:        #1E40AF;  /* secondary blue medical */
+  --color-brand-action: #3B82F6;  /* accent action */
+
+  --color-success: #059669;
+  --color-warning: #D97706;
+  --color-danger:  #DC2626;
+
+  --color-surface:        #FFFFFF;
+  --color-surface-subtle: #F9FAFB;
+
+  --color-line:        #E5E7EB;
+  --color-line-strong: #D1D5DB;
+
+  --color-ink:        #111827;
+  --color-ink-muted:  #6B7280;
+  --color-ink-soft:   #9CA3AF;
+
+  --shadow-elev-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-elev-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+  --shadow-elev-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -123,8 +146,15 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   html {
     @apply font-sans;
+  }
+  /* Tabular numerals em métricas para alinhamento vertical */
+  .num-tabular {
+    font-variant-numeric: tabular-nums;
   }
 }

@@ -186,7 +186,7 @@ export default function PacientesPage() {
                       <div className="text-xs text-slate-400">{p.matricula} · {calcularIdade(p.data_nascimento)} anos</div>
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{p.setor}</td>
+                  <td className="px-4 py-3 text-slate-600">{p.setor?.trim() ? p.setor : <span className="text-slate-400">—</span>}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {linhas.map(l => {

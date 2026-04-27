@@ -16,6 +16,24 @@ import type { Paciente, LinhaCuidado } from '@/types'
 
 const COMORBIDADES = PROTOCOLOS.map(p => ({ codigo: p.codigo, nome: p.nome, cor: p.cor, icone: p.icone }))
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Title-case PT-BR mantendo conectivos minúsculos
+const CONECTIVOS_PT = new Set(['da', 'de', 'di', 'do', 'du', 'das', 'des', 'dos', 'e'])
+function titleCasePT(input: string): string {
+  return input
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('pt-BR')
+    .split(' ')
+    .map((palavra, idx) => {
+      if (idx > 0 && CONECTIVOS_PT.has(palavra)) return palavra
+      if (palavra.length === 0) return palavra
+      return palavra.charAt(0).toLocaleUpperCase('pt-BR') + palavra.slice(1)
+    })
+    .join(' ')
+}
+
 // ─── Validação ───────────────────────────────────────────────────────────────
 
 const PacienteSchema = z.object({
@@ -29,7 +47,7 @@ const PacienteSchema = z.object({
       const ano = data.getFullYear()
       return ano >= 1920 && ano <= new Date().getFullYear()
     }, 'Data de nascimento inválida (ano deve estar entre 1920 e o ano atual)'),
-  sexo: z.enum(['M', 'F', 'O'], { message: 'Selecione o sexo' }),
+  sexo: z.enum(['M', 'F', 'O'], { message: 'Selecione o sexo do paciente' }),
   matricula: z.string().trim().min(1, 'Matrícula é obrigatória'),
   setor: z.string().optional(),
   cargo: z.string().optional(),
@@ -45,12 +63,12 @@ const PacienteSchema = z.object({
   atividade_fisica: z.string(),
 })
 
-type FormState = z.infer<typeof PacienteSchema>
+type FormState = Omit<z.infer<typeof PacienteSchema>, 'sexo'> & { sexo: '' | 'M' | 'F' | 'O' }
 
 const INITIAL: FormState = {
   nome: '',
   data_nascimento: '',
-  sexo: 'M',
+  sexo: '',
   matricula: '',
   setor: '',
   cargo: '',
@@ -98,7 +116,7 @@ export default function NovoPacientePage() {
   const adicionarPaciente = useRuntimeStore((s) => s.adicionarPaciente)
   const adicionarLinha = useRuntimeStore((s) => s.adicionarLinha)
 
-  const [form, setForm] = useState<FormState>({ ...INITIAL, sexo: 'M' as const })
+  const [form, setForm] = useState<FormState>(INITIAL)
   const [erros, setErros] = useState<Record<string, string>>({})
   const [erroGeral, setErroGeral] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -200,7 +218,7 @@ export default function NovoPacientePage() {
       return
     }
 
-    const dados = parsed.data
+    const dados = { ...parsed.data, nome: titleCasePT(parsed.data.nome) }
     setErros({})
     setSalvando(true)
 
@@ -387,8 +405,9 @@ export default function NovoPacientePage() {
                 onChange={e => update('sexo', e.target.value as FormState['sexo'])}
                 className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
               >
-                <option value="M">Masculino</option>
+                <option value="">Selecione…</option>
                 <option value="F">Feminino</option>
+                <option value="M">Masculino</option>
                 <option value="O">Outro</option>
               </select>
               <FieldError campo="sexo" />

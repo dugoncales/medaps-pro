@@ -332,7 +332,7 @@ export default function PacientePage() {
           <div>
             <h1 className="text-xl font-bold text-slate-800">{paciente.nome}</h1>
             <p className="text-sm text-slate-500">
-              {paciente.matricula} · {idade} anos · {paciente.setor}
+              {paciente.matricula} · {idade} anos · {paciente.setor?.trim() || 'Setor não informado'}
               {paciente.tabagismo_status === 'atual' && ' · 🚬 Tabagista'}
             </p>
             <div className="mt-2 flex flex-wrap gap-1">
@@ -401,7 +401,7 @@ export default function PacientePage() {
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-slate-500">Setor</dt>
-                  <dd className="font-medium">{paciente.setor ?? '—'}</dd>
+                  <dd className="font-medium">{paciente.setor?.trim() ? paciente.setor : <span className="text-slate-400">Não informado</span>}</dd>
                 </div>
                 {paciente.tabagismo_status && paciente.tabagismo_status !== 'nunca' && (
                   <div className="flex justify-between">
