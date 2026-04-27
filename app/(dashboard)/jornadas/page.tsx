@@ -16,34 +16,47 @@ function estimarPasso(nivel?: string): number {
 }
 
 async function buildJornadas(): Promise<{ paciente_id: string; protocolo: string; jornada: StatusJornada }[]> {
-  const ativas = demoLinhas.filter(l => l.status === 'ativo')
+  try {
+    const ativas = (demoLinhas ?? []).filter(l => l?.status === 'ativo')
+    if (ativas.length === 0) return []
 
-  return Promise.all(
-    ativas.map(async (linha) => {
-      const evolucoes = demoEvolucoes
-        .filter(e => e.paciente_id === linha.paciente_id && e.protocolo_codigo === linha.protocolo_codigo)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    const resultados = await Promise.all(
+      ativas.map(async (linha) => {
+        try {
+          const evolucoes = (demoEvolucoes ?? [])
+            .filter(e => e.paciente_id === linha.paciente_id && e.protocolo_codigo === linha.protocolo_codigo)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-      const ultimaEvolucao = evolucoes[0]
+          const ultimaEvolucao = evolucoes[0]
 
-      const historico = demoConsultas
-        .filter(c => c.paciente_id === linha.paciente_id)
-        .map(c => {
-          const ev = demoEvolucoes.find(e => e.consulta_id === c.id && e.protocolo_codigo === linha.protocolo_codigo)
-          return { ...c, passo_protocolo: ev?.passo_protocolo, metricas: ev?.metricas ?? {} }
-        })
+          const historico = (demoConsultas ?? [])
+            .filter(c => c.paciente_id === linha.paciente_id)
+            .map(c => {
+              const ev = (demoEvolucoes ?? []).find(e => e.consulta_id === c.id && e.protocolo_codigo === linha.protocolo_codigo)
+              return { ...c, passo_protocolo: ev?.passo_protocolo, metricas: ev?.metricas ?? {} }
+            })
 
-      const exames = demoExames.filter(e => e.paciente_id === linha.paciente_id)
+          const exames = (demoExames ?? []).filter(e => e.paciente_id === linha.paciente_id)
 
-      const metricas = {
-        ...((ultimaEvolucao?.metricas ?? {}) as Record<string, any>),
-        passo_protocolo: ultimaEvolucao?.passo_protocolo ?? estimarPasso(linha.nivel_gravidade),
-      }
+          const metricas = {
+            ...((ultimaEvolucao?.metricas ?? {}) as Record<string, any>),
+            passo_protocolo: ultimaEvolucao?.passo_protocolo ?? estimarPasso(linha.nivel_gravidade),
+          }
 
-      const jornada = await calcularJornada(linha.paciente_id, linha.protocolo_codigo, metricas, historico, exames)
-      return { paciente_id: linha.paciente_id, protocolo: linha.protocolo_codigo, jornada }
-    })
-  )
+          const jornada = await calcularJornada(linha.paciente_id, linha.protocolo_codigo, metricas, historico, exames)
+          return { paciente_id: linha.paciente_id, protocolo: linha.protocolo_codigo, jornada }
+        } catch (err) {
+          console.error('[Jornadas] Falha ao calcular linha', linha.paciente_id, linha.protocolo_codigo, err)
+          return null
+        }
+      })
+    )
+
+    return resultados.filter((r): r is { paciente_id: string; protocolo: string; jornada: StatusJornada } => r !== null)
+  } catch (err) {
+    console.error('[Jornadas] buildJornadas falhou', err)
+    return []
+  }
 }
 
 // ─── Funil por protocolo ──────────────────────────────────────────────────────
@@ -106,19 +119,46 @@ export default async function JornadasPage() {
 
   const protocolosComFunil = [...funil.entries()]
     .map(([codigo, steps]) => ({ codigo, steps, protocolo: PROTOCOLO_MAP.get(codigo) }))
-    .filter(x => x.protocolo)
+    .filter((x): x is { codigo: string; steps: number[]; protocolo: NonNullable<typeof x.protocolo> } =>
+      Boolean(x.protocolo) && Array.isArray(x.protocolo!.passos_fluxo) && x.protocolo!.passos_fluxo.length > 0)
     .sort((a, b) => {
       const totalA = a.steps.reduce((s, n) => s + n, 0)
       const totalB = b.steps.reduce((s, n) => s + n, 0)
       return totalB - totalA
     })
 
+  if (todas.length === 0) {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto">
+        <div>
+          <h1 className="text-xl font-bold text-[#111827]">Automação de Jornadas</h1>
+          <p className="text-sm text-[#6B7280] mt-1">Visão consolidada das próximas ações por paciente.</p>
+        </div>
+        <div className="rounded-xl border border-[#E5E7EB] bg-white p-10 text-center shadow-[0_1px_2px_0_rgba(0,0,0,0.04)]">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#EFF6FF] text-2xl">
+            🗺️
+          </div>
+          <p className="text-sm font-semibold text-[#111827]">Nenhuma jornada ativa</p>
+          <p className="text-xs text-[#6B7280] mt-1 max-w-sm mx-auto">
+            Cadastre pacientes em linhas de cuidado para começar a acompanhar jornadas automatizadas.
+          </p>
+          <Link
+            href="/pacientes/novo"
+            className="mt-4 inline-flex rounded-lg bg-[#1E40AF] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1E3A8A] transition-colors"
+          >
+            ＋ Novo Paciente
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-bold text-slate-800">Automação de Jornadas</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-xl font-bold text-[#111827]">Automação de Jornadas</h1>
+        <p className="text-sm text-[#6B7280] mt-1">
           {todas.length} linhas de cuidado ativas · {acaoImediata.length} ações imediatas · {estaSemana.length} para esta semana
         </p>
       </div>
@@ -126,15 +166,15 @@ export default async function JornadasPage() {
       {/* ── SEÇÃO 1: Ação Imediata ─────────────────────────────────────────── */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-          <h2 className="text-base font-bold text-slate-800">Ação Imediata</h2>
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700">
+          <div className="h-3 w-3 rounded-full bg-[#DC2626] animate-pulse" />
+          <h2 className="text-base font-bold text-[#111827]">Ação Imediata</h2>
+          <span className="rounded-full border border-[#FECACA] bg-[#FEF2F2] px-2 py-0.5 text-xs font-bold text-[#991B1B] num-tabular">
             {acaoImediata.length}
           </span>
         </div>
 
         {acaoImediata.length === 0 ? (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700">
+          <div className="rounded-xl border border-[#A7F3D0] bg-[#ECFDF5] px-5 py-4 text-sm font-medium text-[#065F46]">
             ✅ Nenhuma ação crítica ou urgente no momento.
           </div>
         ) : (
@@ -142,9 +182,12 @@ export default async function JornadasPage() {
             {acaoImediata.map((acao, i) => {
               const badge = urgenciaBadge(acao.urgencia)
               const prazo = prazoBadge(acao.prazo)
-              const borderCor = acao.urgencia >= 5 ? '#DC2626' : '#D97706'
-              const btnCor = acao.urgencia >= 5 ? '#DC2626' : '#1E40AF'
-              const btnHover = acao.urgencia >= 5 ? '#B91C1C' : '#1E3A8A'
+              const isCritical = acao.urgencia >= 5
+              const borderCor = isCritical ? '#DC2626' : '#D97706'
+              const btnClass = isCritical
+                ? 'bg-[#DC2626] hover:bg-[#B91C1C]'
+                : 'bg-[#1E40AF] hover:bg-[#1E3A8A]'
+              const protocolo = PROTOCOLO_MAP.get(acao.protocolo)
               return (
                 <div
                   key={i}
@@ -153,19 +196,14 @@ export default async function JornadasPage() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-[#111827] truncate">{acao.paciente_nome}</p>
+                      <p className="text-sm font-bold text-[#111827] truncate">{acao.paciente_nome ?? '—'}</p>
                       <div className="flex items-center gap-1.5 mt-1">
-                        {(() => {
-                          const p = PROTOCOLO_MAP.get(acao.protocolo)
-                          return (
-                            <span
-                              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
-                              style={{ backgroundColor: p?.cor ?? '#6B7280' }}
-                            >
-                              {acao.protocolo}
-                            </span>
-                          )
-                        })()}
+                        <span
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                          style={{ backgroundColor: protocolo?.cor ?? '#6B7280' }}
+                        >
+                          {acao.protocolo}
+                        </span>
                         <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', badge.className)}>
                           {badge.label}
                         </span>
@@ -183,10 +221,10 @@ export default async function JornadasPage() {
                     <span className={cn('text-xs font-semibold', prazo.className)}>{prazo.label}</span>
                     <Link
                       href={`/pacientes/${acao.paciente_id}/consulta`}
-                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                      style={{ backgroundColor: btnCor }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = btnHover)}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = btnCor)}
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors',
+                        btnClass,
+                      )}
                     >
                       Atender Agora →
                     </Link>
@@ -201,15 +239,15 @@ export default async function JornadasPage() {
       {/* ── SEÇÃO 2: Esta Semana ───────────────────────────────────────────── */}
       <section>
         <div className="flex items-center gap-2 mb-4">
-          <div className="h-3 w-3 rounded-full bg-amber-500" />
-          <h2 className="text-base font-bold text-slate-800">Esta Semana</h2>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+          <div className="h-3 w-3 rounded-full bg-[#D97706]" />
+          <h2 className="text-base font-bold text-[#111827]">Esta Semana</h2>
+          <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2 py-0.5 text-xs font-bold text-[#92400E] num-tabular">
             {estaSemana.length}
           </span>
         </div>
 
         {estaSemana.length === 0 ? (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm text-slate-500">
+          <div className="rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-5 py-4 text-sm text-[#6B7280]">
             Nenhuma ação pendente para esta semana.
           </div>
         ) : (
@@ -283,8 +321,8 @@ export default async function JornadasPage() {
       <section>
         <div className="flex items-center gap-2 mb-4">
           <div className="h-3 w-3 rounded-full bg-blue-500" />
-          <h2 className="text-base font-bold text-slate-800">Visão Geral por Protocolo</h2>
-          <span className="text-xs text-slate-400">— distribuição por passo</span>
+          <h2 className="text-base font-bold text-[#111827]">Visão Geral por Protocolo</h2>
+          <span className="text-xs text-[#9CA3AF]">— distribuição por passo</span>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -298,43 +336,43 @@ export default async function JornadasPage() {
               <div key={codigo} className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] transition-shadow hover:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.07),0_2px_4px_-1px_rgba(0,0,0,0.05)]">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="text-xl">{proto!.icone}</span>
+                  <span className="text-xl">{proto.icone ?? '📋'}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-slate-800 truncate">{proto!.nome}</p>
-                    <p className="text-xs text-slate-400">{total} paciente{total !== 1 ? 's' : ''} ativos</p>
+                    <p className="text-sm font-bold text-[#111827] truncate">{proto.nome}</p>
+                    <p className="text-xs text-[#9CA3AF]">{total} paciente{total !== 1 ? 's' : ''} ativos</p>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-lg font-bold" style={{ color: proto!.cor }}>{metaPct}%</p>
-                    <p className="text-[10px] text-slate-400">na meta</p>
+                    <p className="text-lg font-bold num-tabular" style={{ color: proto.cor }}>{metaPct}%</p>
+                    <p className="text-[10px] text-[#9CA3AF]">na meta</p>
                   </div>
                 </div>
 
                 {/* Funnel bars */}
                 <div className="space-y-2">
-                  {proto!.passos_fluxo.map((passo, idx) => {
-                    const count = steps[idx]
+                  {proto.passos_fluxo.map((passo, idx) => {
+                    const count = steps[idx] ?? 0
                     const barPct = maxStep > 0 ? Math.round((count / maxStep) * 100) : 0
-                    const isLast = idx === proto!.passos_fluxo.length - 1
+                    const isLast = idx === proto.passos_fluxo.length - 1
                     return (
                       <div key={idx} className="flex items-center gap-2">
-                        <span className="w-5 text-[10px] font-bold text-slate-400 text-right shrink-0">
+                        <span className="w-5 text-[10px] font-bold text-[#9CA3AF] text-right shrink-0">
                           {idx + 1}
                         </span>
-                        <div className="flex-1 relative h-5 rounded bg-slate-100 overflow-hidden">
+                        <div className="flex-1 relative h-5 rounded bg-[#F1F5F9] overflow-hidden">
                           <div
                             className="absolute inset-y-0 left-0 rounded transition-all duration-500"
                             style={{
                               width: `${barPct}%`,
-                              backgroundColor: isLast ? proto!.cor : `${proto!.cor}60`,
+                              backgroundColor: isLast ? proto.cor : `${proto.cor}60`,
                             }}
                           />
-                          <span className="absolute inset-y-0 left-2 flex items-center text-[10px] font-medium text-slate-700">
-                            {passo.titulo}
+                          <span className="absolute inset-y-0 left-2 flex items-center text-[10px] font-medium text-[#111827]">
+                            {passo?.titulo ?? `Passo ${idx + 1}`}
                           </span>
                         </div>
                         <span className={cn(
-                          'w-7 text-right text-xs font-bold shrink-0',
-                          count > 0 ? 'text-slate-700' : 'text-slate-300'
+                          'w-7 text-right text-xs font-bold num-tabular shrink-0',
+                          count > 0 ? 'text-[#111827]' : 'text-[#D1D5DB]'
                         )}>
                           {count}
                         </span>
@@ -344,13 +382,13 @@ export default async function JornadasPage() {
                 </div>
 
                 {/* Footer */}
-                <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-xs text-slate-500">
+                <div className="mt-3 pt-3 border-t border-[#E5E7EB] flex items-center justify-between">
+                  <span className="text-xs text-[#6B7280]">
                     {meta} paciente{meta !== 1 ? 's' : ''} na meta
                   </span>
                   <Link
                     href={`/pacientes?protocolo=${codigo}`}
-                    className="text-xs font-medium text-blue-600 hover:underline"
+                    className="text-xs font-semibold text-[#1E40AF] hover:text-[#1E3A8A] transition-colors"
                   >
                     Ver pacientes →
                   </Link>
