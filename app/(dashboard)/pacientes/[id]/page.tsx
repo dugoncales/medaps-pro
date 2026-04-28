@@ -12,6 +12,9 @@ import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { JornadaTimeline } from '@/components/jornada/JornadaTimeline'
 import { EvolucaoPROMs } from '@/components/consulta/EvolucaoPROMs'
 import { HistoricoEscalas } from '@/components/consulta/HistoricoEscalas'
+import { EditarPacienteModal } from '@/components/paciente/EditarPacienteModal'
+import { AdicionarLinhaModal } from '@/components/paciente/AdicionarLinhaModal'
+import { AgendarConsultaModal } from '@/components/paciente/AgendarConsultaModal'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { AlertaItem } from '@/components/shared/AlertaItem'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -26,12 +29,14 @@ import {
 const DURACAO_STEP = 30 // dias médios por passo (estimativa conservadora)
 
 function JornadaTab({
-  jornadas, carregando, pacienteId, linhas,
+  jornadas, carregando, pacienteId, linhas, onAdicionarLinha, onAgendarConsulta,
 }: {
   jornadas: StatusJornada[]
   carregando: boolean
   pacienteId: string
   linhas: import('@/types').LinhaCuidado[]
+  onAdicionarLinha: () => void
+  onAgendarConsulta: (protocoloCodigo?: string) => void
 }) {
   if (carregando) {
     return (
@@ -43,8 +48,14 @@ function JornadaTab({
 
   if (jornadas.length === 0) {
     return (
-      <div className="py-12 text-center text-sm text-slate-400">
-        Nenhuma linha de cuidado ativa.
+      <div className="py-12 text-center">
+        <p className="text-sm text-slate-400">Nenhuma linha de cuidado ativa.</p>
+        <Button
+          onClick={onAdicionarLinha}
+          className="mt-4 bg-blue-600 hover:bg-blue-500 gap-1.5"
+        >
+          + Adicionar linha de cuidado
+        </Button>
       </div>
     )
   }
@@ -75,6 +86,16 @@ function JornadaTab({
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end">
+        <Button
+          onClick={onAdicionarLinha}
+          variant="outline"
+          className="gap-1.5"
+        >
+          + Adicionar linha de cuidado
+        </Button>
+      </div>
+
       {/* Overall progress */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between mb-3">
@@ -120,9 +141,7 @@ function JornadaTab({
               key={j.protocolo}
               statusJornada={j}
               protocolo={proto}
-              onAgendarConsulta={() => {
-                window.location.href = `/pacientes/${pacienteId}/consulta`
-              }}
+              onAgendarConsulta={() => onAgendarConsulta(j.protocolo)}
             />
           )
         })}
@@ -219,6 +238,9 @@ export default function PacientePage() {
   const [supabasePaciente, setSupabasePaciente] = useState<Paciente | null>(null)
   const [supabaseLinhas, setSupabaseLinhas] = useState<LinhaCuidado[]>([])
   const [carregandoPaciente, setCarregandoPaciente] = useState(!IS_DEMO_MODE)
+  const [editarAberto, setEditarAberto] = useState(false)
+  const [adicionarLinhaAberto, setAdicionarLinhaAberto] = useState(false)
+  const [agendarAberto, setAgendarAberto] = useState<{ protocoloSugerido?: string } | null>(null)
 
   useEffect(() => {
     if (IS_DEMO_MODE || !id) return
@@ -354,12 +376,59 @@ export default function PacientePage() {
             </div>
           </div>
         </div>
-        <Link href={`/pacientes/${id}/consulta`}>
-          <Button className="bg-blue-600 hover:bg-blue-500 gap-2">
-            📋 Nova Consulta
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setEditarAberto(true)}
+            className="gap-1.5"
+          >
+            ✏️ Editar
           </Button>
-        </Link>
+          <Button
+            variant="outline"
+            onClick={() => setAgendarAberto({})}
+            className="gap-1.5"
+          >
+            📅 Agendar
+          </Button>
+          <Link href={`/pacientes/${id}/consulta`}>
+            <Button className="bg-blue-600 hover:bg-blue-500 gap-2">
+              📋 Nova Consulta
+            </Button>
+          </Link>
+        </div>
       </div>
+
+      <EditarPacienteModal
+        aberto={editarAberto}
+        onFechar={() => setEditarAberto(false)}
+        paciente={paciente}
+        onAtualizado={(p) => setSupabasePaciente(p)}
+      />
+
+      <AdicionarLinhaModal
+        aberto={adicionarLinhaAberto}
+        onFechar={() => setAdicionarLinhaAberto(false)}
+        pacienteId={id}
+        pacienteNome={paciente.nome}
+        profissionalId={demoProfissional.id}
+        protocolosJaAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo)}
+        onAdicionado={(linha) => setSupabaseLinhas(prev => [...prev, linha])}
+      />
+
+      <AgendarConsultaModal
+        aberto={agendarAberto !== null}
+        onFechar={() => setAgendarAberto(null)}
+        pacienteId={id}
+        pacienteNome={paciente.nome}
+        protocolosAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo)}
+        protocoloSugerido={agendarAberto?.protocoloSugerido}
+        profissionalId={demoProfissional.id}
+        onAgendado={() => {
+          // Em modo real o realtime channel do dashboard atualiza a agenda;
+          // aqui só fechamos o modal — toast é disparado dentro do modal.
+        }}
+      />
 
       {/* Tabs */}
       <Tabs defaultValue="resumo">
@@ -382,7 +451,14 @@ export default function PacientePage() {
 
         {/* Jornada */}
         <TabsContent value="jornada" className="pt-4">
-          <JornadaTab jornadas={jornadas} carregando={jornadasCarregando} pacienteId={id} linhas={linhas} />
+          <JornadaTab
+            jornadas={jornadas}
+            carregando={jornadasCarregando}
+            pacienteId={id}
+            linhas={linhas}
+            onAdicionarLinha={() => setAdicionarLinhaAberto(true)}
+            onAgendarConsulta={(proto) => setAgendarAberto({ protocoloSugerido: proto })}
+          />
         </TabsContent>
 
         {/* Resumo */}

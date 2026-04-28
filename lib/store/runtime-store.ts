@@ -28,6 +28,7 @@ interface RuntimeState {
   escalas: AplicacaoEscala[]
 
   adicionarPaciente: (p: Paciente) => void
+  atualizarPaciente: (id: string, patch: Partial<Paciente>) => void
   adicionarLinha: (l: LinhaCuidado) => void
   adicionarEscala: (e: AplicacaoEscala) => void
 
@@ -45,6 +46,11 @@ export const useRuntimeStore = create<RuntimeState>()(
 
       adicionarPaciente: (p) =>
         set((s) => ({ pacientes: [...s.pacientes, p] })),
+
+      atualizarPaciente: (id, patch) =>
+        set((s) => ({
+          pacientes: s.pacientes.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        })),
 
       adicionarLinha: (l) =>
         set((s) => ({ linhas: [...s.linhas, l] })),
