@@ -7,7 +7,6 @@ import { Topbar } from './_components/topbar'
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let profissionalNome = demoProfissional.nome
   let totalAlertas = demoAlertas.filter(a => !a.resolvido).length
-  const totalPacientes = 8
 
   if (!IS_DEMO_MODE) {
     const supabase = await createClient()
@@ -32,11 +31,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
-      <Sidebar
-        profissionalNome={profissionalNome}
-        totalAlertas={totalAlertas}
-        totalPacientes={totalPacientes}
-      />
+      <Sidebar profissionalNome={profissionalNome} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profissionalNome={profissionalNome} totalAlertas={totalAlertas} />
         <main className="flex-1 overflow-y-auto p-6">

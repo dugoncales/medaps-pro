@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   LineChart, Line,
 } from 'recharts'
-import { demoEmpresa, demoIndicadores, demoLinhas } from '@/lib/demo-data'
-import { PROTOCOLO_MAP } from '@/lib/protocolos'
+import { IS_DEMO_MODE, demoEmpresa, demoIndicadores, demoLinhas } from '@/lib/demo-data'
+import { createClient } from '@/lib/supabase/client'
+import type { Empresa, IndicadoresEmpresa, LinhaCuidado } from '@/types'
 import { MetricCard } from '@/components/shared/MetricCard'
 import { ProgressoProtocolo } from '@/components/shared/ProgressoProtocolo'
 import { Button } from '@/components/ui/button'
@@ -16,10 +17,10 @@ type Periodo = 'mensal' | 'trimestral' | 'anual'
 
 const MESES = ['Out/25', 'Nov/25', 'Dez/25', 'Jan/26', 'Fev/26', 'Mar/26']
 
-function calcProtocoloPct(codigo: string) {
-  const linhas = demoLinhas.filter(l => l.protocolo_codigo === codigo && l.status === 'ativo')
-  if (!linhas.length) return 0
-  return Math.round((linhas.filter(l => l.nivel_gravidade === 'controlado').length / linhas.length) * 100)
+function calcProtocoloPct(linhas: LinhaCuidado[], codigo: string) {
+  const ls = linhas.filter(l => l.protocolo_codigo === codigo && l.status === 'ativo')
+  if (!ls.length) return 0
+  return Math.round((ls.filter(l => l.nivel_gravidade === 'controlado').length / ls.length) * 100)
 }
 
 const PROTOCOLO_BARS = [
@@ -32,12 +33,6 @@ const PROTOCOLO_BARS = [
   { codigo: 'TAG', nome: 'TAG', cor: '#1A237E' },
   { codigo: 'CHK', nome: 'CHK', cor: '#1A56A0' },
 ]
-
-const barData = PROTOCOLO_BARS.map(p => ({
-  nome: p.nome,
-  pct: calcProtocoloPct(p.codigo),
-  fill: p.cor,
-}))
 
 const INDICADORES_PROCESSO = [
   { label: 'Check-up realizado no ano', pct: 62 },
@@ -52,18 +47,65 @@ export default function RelatorioPage() {
   const [periodo, setPeriodo] = useState<Periodo>('mensal')
   const reportRef = useRef<HTMLDivElement>(null)
 
-  const ultimoIndicador = demoIndicadores[demoIndicadores.length - 1]
-  const taxaControle = ultimoIndicador?.taxa_controle_geral ?? 37
-  const totalPacientes = ultimoIndicador?.total_pacientes ?? 8
-  const roiEstimado = ultimoIndicador?.roi_estimado ?? 59200
+  const [empresa, setEmpresa] = useState<Empresa>(demoEmpresa)
+  const [indicadores, setIndicadores] = useState<IndicadoresEmpresa[]>(demoIndicadores)
+  const [linhas, setLinhas] = useState<LinhaCuidado[]>(demoLinhas)
+
+  useEffect(() => {
+    if (IS_DEMO_MODE) return
+    const supabase = createClient()
+    let cancelado = false
+
+    async function fetchTudo() {
+      const [profRes] = await Promise.all([
+        supabase.auth.getUser(),
+      ])
+      const user = profRes.data.user
+      if (!user) return
+
+      const { data: prof } = await supabase
+        .from('profissionais')
+        .select('empresa_id')
+        .eq('user_id', user.id)
+        .single()
+      if (!prof?.empresa_id) return
+
+      const [empRes, indRes, linRes] = await Promise.all([
+        supabase.from('empresas').select('*').eq('id', prof.empresa_id).single(),
+        supabase.from('indicadores_empresa').select('*').eq('empresa_id', prof.empresa_id)
+          .order('competencia', { ascending: true }).limit(12),
+        supabase.from('linhas_cuidado').select('*').eq('status', 'ativo'),
+      ])
+
+      if (cancelado) return
+      if (empRes.data) setEmpresa(empRes.data as Empresa)
+      if (indRes.data && indRes.data.length > 0) setIndicadores(indRes.data as IndicadoresEmpresa[])
+      if (linRes.data) setLinhas(linRes.data as LinhaCuidado[])
+    }
+
+    fetchTudo()
+    return () => { cancelado = true }
+  }, [])
+
+  const ultimoIndicador = indicadores[indicadores.length - 1]
+  const taxaControle = ultimoIndicador?.taxa_controle_geral ?? 0
+  const totalPacientes = ultimoIndicador?.total_pacientes ?? 0
+  const roiEstimado = ultimoIndicador?.roi_estimado ?? 0
 
   const afastamentosEvitados = Math.round(totalPacientes * 0.8)
   const economiaMes = roiEstimado
-  const roiMultiplo = (roiEstimado / 15000).toFixed(1)
+  const roiMultiplo = roiEstimado > 0 ? (roiEstimado / 15000).toFixed(1) : '0.0'
+
+  const barData = useMemo(
+    () => PROTOCOLO_BARS.map(p => ({ nome: p.nome, pct: calcProtocoloPct(linhas, p.codigo), fill: p.cor })),
+    [linhas],
+  )
 
   // Série temporal para gráfico de evolução
-  const tendenciaData = demoIndicadores.map((ind, i) => ({
-    mes: MESES[i] ?? '',
+  const tendenciaData = indicadores.map((ind, i) => ({
+    mes: ind.competencia
+      ? new Date(ind.competencia).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
+      : (MESES[i] ?? ''),
     controle: ind.taxa_controle_geral,
     has: ind.has_controlados_pct,
     dm: ind.dm_controlados_pct,
@@ -91,7 +133,7 @@ export default function RelatorioPage() {
       ['Taxa controle geral (%)', taxaControle],
       ['ROI estimado (R$)', roiEstimado],
       ['Afastamentos evitados', afastamentosEvitados],
-      ...PROTOCOLO_BARS.map(p => [`${p.nome} controlados (%)`, calcProtocoloPct(p.codigo)]),
+      ...PROTOCOLO_BARS.map(p => [`${p.nome} controlados (%)`, calcProtocoloPct(linhas, p.codigo)]),
     ]
     const csv = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -107,7 +149,7 @@ export default function RelatorioPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Relatório Empresa</h1>
-          <p className="text-sm text-slate-500">{demoEmpresa.nome} · {demoEmpresa.total_colaboradores} colaboradores</p>
+          <p className="text-sm text-slate-500">{empresa.nome} · {empresa.total_colaboradores} colaboradores</p>
         </div>
         <div className="flex items-center gap-3">
           {/* Seletor de período */}
@@ -141,7 +183,7 @@ export default function RelatorioPage() {
           <MetricCard
             label="Colaboradores em Linha de Cuidado"
             value={totalPacientes}
-            subtexto={`de ${demoEmpresa.total_colaboradores} colaboradores`}
+            subtexto={`de ${empresa.total_colaboradores} colaboradores`}
             cor="blue"
             icone={<span>👥</span>}
           />

@@ -532,6 +532,8 @@ export default function PacientePage() {
             protocolosAtivos={linhas.map(l => l.protocolo_codigo)}
             consultas={consultas}
             profissionalNome={demoProfissional.nome}
+            empresaId={paciente.empresa_id}
+            profissionalId={demoProfissional.id}
           />
         </TabsContent>
 

@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
+import { Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ModalAplicarEscala } from '@/components/consulta/ModalAplicarEscala'
+import { ModalEnviarEscala } from '@/components/consulta/ModalEnviarEscala'
 import { useRuntimeStore, gerarId, type AplicacaoEscala } from '@/lib/store/runtime-store'
 import { ESCALAS, type EscalaCodigo, type ResultadoEscala } from '@/lib/escalas/ichom'
 import { cn } from '@/lib/utils'
@@ -106,16 +108,19 @@ interface HistoricoEscalasProps {
   protocolosAtivos: string[]
   consultas: Consulta[]
   profissionalNome: string
+  empresaId?: string
+  profissionalId?: string
 }
 
 export function HistoricoEscalas({
-  pacienteId, pacienteNome, protocolosAtivos, consultas, profissionalNome,
+  pacienteId, pacienteNome, protocolosAtivos, consultas, profissionalNome, empresaId, profissionalId,
 }: HistoricoEscalasProps) {
   const aplicacoes = useRuntimeStore((s) => s.escalasPorPaciente(pacienteId))
   const adicionarEscala = useRuntimeStore((s) => s.adicionarEscala)
 
   const [modalAberto, setModalAberto] = useState(false)
   const [escalasOcultas, setEscalasOcultas] = useState<Set<EscalaCodigo>>(new Set())
+  const [enviarAberto, setEnviarAberto] = useState<{ codigo: EscalaCodigo } | null>(null)
 
   const registros = useMemo(
     () => obterRegistros(consultas, aplicacoes),
@@ -201,6 +206,19 @@ export function HistoricoEscalas({
         </Button>
       </div>
 
+      {enviarAberto && empresaId && (
+        <ModalEnviarEscala
+          aberto
+          onFechar={() => setEnviarAberto(null)}
+          paciente={{ id: pacienteId, nome: pacienteNome }}
+          empresaId={empresaId}
+          escalaCodigo={enviarAberto.codigo}
+          escalaNome={ESCALAS[enviarAberto.codigo].nome}
+          tipo="prom"
+          profissionalId={profissionalId}
+        />
+      )}
+
       {/* SEÇÃO 1 — Cards de escalas atuais */}
       {ultimosPorCodigo.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
@@ -247,13 +265,25 @@ export function HistoricoEscalas({
                   <span className="text-slate-400">
                     {ultima.data.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit' })}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setModalAberto(true)}
-                    className="font-semibold text-blue-600 hover:text-blue-500"
-                  >
-                    Aplicar agora →
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {empresaId && (
+                      <button
+                        type="button"
+                        onClick={() => setEnviarAberto({ codigo: ultima.codigo })}
+                        className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-blue-600"
+                        title="Enviar para o paciente"
+                      >
+                        <Send className="h-3 w-3" /> Enviar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setModalAberto(true)}
+                      className="font-semibold text-blue-600 hover:text-blue-500"
+                    >
+                      Aplicar agora →
+                    </button>
+                  </div>
                 </div>
               </div>
             )

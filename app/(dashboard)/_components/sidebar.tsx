@@ -11,26 +11,24 @@ import {
   TrendingUp,
   LogOut,
   Activity,
+  ClipboardList,
+  Send,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import { IS_DEMO_MODE, demoLinhas } from '@/lib/demo-data'
-
-const JORNADAS_URGENTES = IS_DEMO_MODE
-  ? demoLinhas.filter(l => l.status === 'ativo' && l.nivel_gravidade === 'descontrolado').length
-  : 0
+import { IS_DEMO_MODE } from '@/lib/demo-data'
+import { useContadores } from './use-contadores'
 
 interface NavItem {
   href: string
   label: string
   Icon: LucideIcon
+  badgeKey?: 'pacientes' | 'alertas' | 'jornadasUrgentes'
 }
 
 interface SidebarProps {
   profissionalNome: string
-  totalAlertas: number
-  totalPacientes: number
 }
 
 const SECOES: { titulo: string; itens: NavItem[] }[] = [
@@ -38,9 +36,16 @@ const SECOES: { titulo: string; itens: NavItem[] }[] = [
     titulo: 'Principal',
     itens: [
       { href: '/painel',    label: 'Dashboard', Icon: LayoutDashboard },
-      { href: '/pacientes', label: 'Pacientes', Icon: Users },
-      { href: '/jornadas',  label: 'Jornadas',  Icon: Map },
-      { href: '/alertas',   label: 'Alertas',   Icon: Bell },
+      { href: '/pacientes', label: 'Pacientes', Icon: Users, badgeKey: 'pacientes' },
+      { href: '/jornadas',  label: 'Jornadas',  Icon: Map, badgeKey: 'jornadasUrgentes' },
+      { href: '/alertas',   label: 'Alertas',   Icon: Bell, badgeKey: 'alertas' },
+    ],
+  },
+  {
+    titulo: 'Escalas',
+    itens: [
+      { href: '/escalas', label: 'PROMs e PREMs', Icon: ClipboardList },
+      { href: '/envios',  label: 'Envios',         Icon: Send },
     ],
   },
   {
@@ -57,15 +62,10 @@ const SECOES: { titulo: string; itens: NavItem[] }[] = [
   },
 ]
 
-export function Sidebar({ profissionalNome, totalAlertas, totalPacientes }: SidebarProps) {
+export function Sidebar({ profissionalNome }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
-
-  const badges: Record<string, number> = {
-    '/pacientes': totalPacientes,
-    '/alertas':   totalAlertas,
-    '/jornadas':  JORNADAS_URGENTES,
-  }
+  const contadores = useContadores()
 
   async function handleLogout() {
     if (!IS_DEMO_MODE) {
@@ -110,7 +110,7 @@ export function Sidebar({ profissionalNome, totalAlertas, totalPacientes }: Side
             <ul className="space-y-0.5">
               {secao.itens.map((item) => {
                 const ativo = isActive(item.href)
-                const badge = badges[item.href]
+                const badge = item.badgeKey ? contadores[item.badgeKey] : undefined
                 const Icon = item.Icon
                 return (
                   <li key={item.href}>
