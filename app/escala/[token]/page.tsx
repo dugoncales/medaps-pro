@@ -22,6 +22,11 @@ import {
   type PremPergunta,
   type RespostasPREM,
 } from '@/lib/escalas/prems'
+import {
+  avaliarAlertaCriticoPROM,
+  avaliarAlertaCriticoPREM,
+  type AlertaPayload,
+} from '@/lib/escalas/alertas-criticos'
 import { cn } from '@/lib/utils'
 
 interface EnvioInfo {
@@ -108,14 +113,21 @@ export default function EscalaPublicaPage() {
 
     let score = 0
     let classificacao = ''
+    let alertaPayload: AlertaPayload | null = null
     if (isPROM && escalaIchom) {
       const r = calcularResultado(envio.escala_codigo as EscalaCodigo, respostas)
       score = r.score
       classificacao = r.classificacao
+      alertaPayload = avaliarAlertaCriticoPROM(envio.escala_codigo as EscalaCodigo, {
+        score: r.score,
+        classificacao: r.classificacao,
+        respostas: r.respostas,
+      })
     } else if (envio.prem_codigo) {
       const r = calcularResultadoPREM(envio.prem_codigo, respostas, envio.protocolos_ativos)
       score = r.score
       classificacao = r.classificacao
+      alertaPayload = avaliarAlertaCriticoPREM(envio.prem_codigo, r)
     }
 
     const supabase = createClient()
@@ -124,6 +136,15 @@ export default function EscalaPublicaPage() {
       p_respostas: respostas,
       p_score: score,
       p_classificacao: classificacao,
+      p_alerta: alertaPayload
+        ? {
+            tipo: alertaPayload.tipo,
+            prioridade: alertaPayload.prioridade,
+            titulo: alertaPayload.titulo,
+            descricao: alertaPayload.descricao,
+            protocolo_codigo: envio.protocolo_codigo,
+          }
+        : null,
     })
 
     setEnviandoResp(false)

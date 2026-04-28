@@ -10,6 +10,10 @@ import { ModalAplicarEscala } from '@/components/consulta/ModalAplicarEscala'
 import { ModalEnviarEscala } from '@/components/consulta/ModalEnviarEscala'
 import { useRuntimeStore, gerarId, type AplicacaoEscala } from '@/lib/store/runtime-store'
 import { ESCALAS, type EscalaCodigo, type ResultadoEscala } from '@/lib/escalas/ichom'
+import { avaliarAlertaCriticoPROM, tituloToastSucesso } from '@/lib/escalas/alertas-criticos'
+import { useToastStore } from '@/lib/store/toast-store'
+import { createClient } from '@/lib/supabase/client'
+import { IS_DEMO_MODE } from '@/lib/demo-data'
 import { cn } from '@/lib/utils'
 import type { Consulta } from '@/types'
 
@@ -117,6 +121,7 @@ export function HistoricoEscalas({
 }: HistoricoEscalasProps) {
   const aplicacoes = useRuntimeStore((s) => s.escalasPorPaciente(pacienteId))
   const adicionarEscala = useRuntimeStore((s) => s.adicionarEscala)
+  const pushToast = useToastStore((s) => s.push)
 
   const [modalAberto, setModalAberto] = useState(false)
   const [escalasOcultas, setEscalasOcultas] = useState<Set<EscalaCodigo>>(new Set())
@@ -166,7 +171,7 @@ export function HistoricoEscalas({
     )
   }, [registros])
 
-  function handleSubmitEscala(codigo: EscalaCodigo, resultado: ResultadoEscala) {
+  async function handleSubmitEscala(codigo: EscalaCodigo, resultado: ResultadoEscala) {
     adicionarEscala({
       id: gerarId('ap'),
       paciente_id: pacienteId,
@@ -176,12 +181,47 @@ export function HistoricoEscalas({
       data: new Date().toISOString(),
     })
     setModalAberto(false)
-    if (resultado.alertas.length > 0) {
-      console.warn(
-        `[HistoricoEscalas] alerta clínico ao registrar ${codigo}:`,
-        resultado.alertas,
-      )
+
+    const alerta = avaliarAlertaCriticoPROM(codigo, {
+      score: resultado.score,
+      classificacao: resultado.classificacao,
+      respostas: resultado.respostas,
+    })
+
+    // Persiste alerta no Supabase quando em modo real e há critério crítico
+    if (alerta && !IS_DEMO_MODE && empresaId) {
+      try {
+        const supabase = createClient()
+        const { error } = await supabase.from('alertas').insert({
+          paciente_id: pacienteId,
+          empresa_id: empresaId,
+          protocolo_codigo: ESCALAS[codigo].protocolosRelacionados[0] ?? 'GERAL',
+          tipo: alerta.tipo,
+          prioridade: alerta.prioridade,
+          titulo: alerta.titulo,
+          descricao: alerta.descricao,
+          dias_atraso: 0,
+          metadata: {
+            origem: 'presencial',
+            escala_codigo: codigo,
+            score: resultado.score,
+            classificacao: resultado.classificacao,
+            data_aplicacao: new Date().toISOString(),
+          },
+        })
+        if (error) console.error('[HistoricoEscalas] insert alerta:', error)
+      } catch (e) {
+        console.error('[HistoricoEscalas] alerta:', e)
+      }
     }
+
+    const toastInfo = tituloToastSucesso(pacienteNome, ESCALAS[codigo].nome, resultado.score, alerta)
+    pushToast({
+      tipo: toastInfo.tipo,
+      titulo: toastInfo.titulo,
+      descricao: toastInfo.descricao,
+      duracao: alerta?.prioridade === 'critica' ? 12000 : 6000,
+    })
   }
 
   function toggleEscalaOculta(codigo: EscalaCodigo) {

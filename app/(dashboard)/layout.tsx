@@ -3,6 +3,8 @@ import { IS_DEMO_MODE, demoProfissional, demoAlertas } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from './_components/sidebar'
 import { Topbar } from './_components/topbar'
+import { AlertaToastListener } from './_components/alerta-toast-listener'
+import { Toaster } from '@/components/shared/Toaster'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let profissionalNome = demoProfissional.nome
@@ -38,6 +40,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           {children}
         </main>
       </div>
+      <AlertaToastListener />
+      <Toaster />
     </div>
   )
 }
