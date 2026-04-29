@@ -15,6 +15,7 @@ import { HistoricoEscalas } from '@/components/consulta/HistoricoEscalas'
 import { EditarPacienteModal } from '@/components/paciente/EditarPacienteModal'
 import { AdicionarLinhaModal } from '@/components/paciente/AdicionarLinhaModal'
 import { AgendarConsultaModal } from '@/components/paciente/AgendarConsultaModal'
+import { formatMatricula } from '@/lib/format'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { AlertaItem } from '@/components/shared/AlertaItem'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -354,7 +355,7 @@ export default function PacientePage() {
           <div>
             <h1 className="text-xl font-bold text-slate-800">{paciente.nome}</h1>
             <p className="text-sm text-slate-500">
-              {paciente.matricula} · {idade} anos · {paciente.setor?.trim() || 'Setor não informado'}
+              {formatMatricula(paciente.matricula)} · {idade} anos · {paciente.setor?.trim() || 'Setor não informado'}
               {paciente.tabagismo_status === 'atual' && ' · 🚬 Tabagista'}
             </p>
             <div className="mt-2 flex flex-wrap gap-1">

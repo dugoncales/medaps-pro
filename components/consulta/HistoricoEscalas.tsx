@@ -40,49 +40,65 @@ const LEGACY_KEY_MAP: Record<string, EscalaCodigo> = {
   eq5d_eva: 'EQ5D5L',
 }
 
-function obterRegistros(consultas: Consulta[], aplicacoesStore: AplicacaoEscala[]): RegistroEscala[] {
+function obterRegistros(
+  consultas: Consulta[] | undefined | null,
+  aplicacoesStore: AplicacaoEscala[] | undefined | null,
+): RegistroEscala[] {
   const registros: RegistroEscala[] = []
 
   // Fontes legadas — campo escalas dentro de cada consulta
-  for (const c of consultas) {
-    if (!c.escalas) continue
-    for (const [k, v] of Object.entries(c.escalas)) {
-      // Formato novo dentro do JSONB: chave é o codigo (PHQ9, GAD7…)
-      if (k in ESCALAS && v && typeof v === 'object' && 'score' in v) {
-        const obj = v as ResultadoEscala
+  for (const c of consultas ?? []) {
+    if (!c?.escalas || typeof c.escalas !== 'object') continue
+    let entries: [string, unknown][] = []
+    try { entries = Object.entries(c.escalas) }
+    catch { continue }
+    for (const [k, v] of entries) {
+      try {
+        // Formato novo dentro do JSONB: chave é o codigo (PHQ9, GAD7…)
+        if (k in ESCALAS && v && typeof v === 'object' && v !== null && 'score' in v) {
+          const obj = v as { score: unknown; classificacao?: unknown }
+          const score = Number(obj.score)
+          if (!Number.isFinite(score)) continue
+          registros.push({
+            id: `${c.id}-${k}`,
+            codigo: k as EscalaCodigo,
+            score,
+            classificacao: typeof obj.classificacao === 'string' ? obj.classificacao : '',
+            data: new Date(c.data_consulta),
+            consulta_id: c.id,
+          })
+          continue
+        }
+
+        // Formato legado: chave camelcase/lower em LEGACY_KEY_MAP, valor numérico
+        const codigo = LEGACY_KEY_MAP[k.toLowerCase()]
+        if (!codigo || typeof v !== 'number' || !Number.isFinite(v)) continue
+        const def = ESCALAS[codigo]
+        if (!def) continue
         registros.push({
           id: `${c.id}-${k}`,
-          codigo: k as EscalaCodigo,
-          score: Number(obj.score),
-          classificacao: obj.classificacao,
+          codigo,
+          score: v,
+          classificacao: def.classificar(v, {}),
           data: new Date(c.data_consulta),
           consulta_id: c.id,
         })
-        continue
+      } catch (err) {
+        console.warn('[HistoricoEscalas] entrada inválida em escalas:', k, err)
       }
-
-      // Formato legado: chave camelcase/lower em LEGACY_KEY_MAP, valor numérico
-      const codigo = LEGACY_KEY_MAP[k.toLowerCase()]
-      if (!codigo || typeof v !== 'number') continue
-      const def = ESCALAS[codigo]
-      registros.push({
-        id: `${c.id}-${k}`,
-        codigo,
-        score: v,
-        classificacao: def.classificar(v, {}),
-        data: new Date(c.data_consulta),
-        consulta_id: c.id,
-      })
     }
   }
 
   // Fonte runtime — store com aplicações isoladas
-  for (const ap of aplicacoesStore) {
+  for (const ap of aplicacoesStore ?? []) {
+    if (!ap?.codigo || !ESCALAS[ap.codigo]) continue
+    const score = Number(ap.resultado?.score)
+    if (!Number.isFinite(score)) continue
     registros.push({
       id: ap.id,
       codigo: ap.codigo,
-      score: ap.resultado.score,
-      classificacao: ap.resultado.classificacao,
+      score,
+      classificacao: ap.resultado?.classificacao ?? '',
       data: new Date(ap.data),
       profissional: ap.profissional_nome,
       consulta_id: ap.consulta_id,
@@ -268,8 +284,10 @@ export function HistoricoEscalas({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {ultimosPorCodigo.map(({ ultima, anterior }) => {
             const def = ESCALAS[ultima.codigo]
+            if (!def) return null
             const delta = anterior ? ultima.score - anterior.score : null
             const cor = CORES[ultima.codigo] ?? '#64748b'
+            const scoreMax = Array.isArray(def.scoreRange) ? def.scoreRange[1] : '?'
             return (
               <div key={ultima.codigo} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-2">
@@ -298,7 +316,7 @@ export function HistoricoEscalas({
                 </div>
                 <div className="mt-3 flex items-baseline gap-1">
                   <span className="text-3xl font-bold" style={{ color: cor }}>{ultima.score}</span>
-                  <span className="text-xs text-slate-400">/ {def.scoreRange[1]}</span>
+                  <span className="text-xs text-slate-400">/ {scoreMax}</span>
                 </div>
                 <p className="text-xs font-semibold text-slate-700 mt-0.5">{ultima.classificacao}</p>
                 <div className="mt-3 flex items-center justify-between text-[11px]">
@@ -341,7 +359,9 @@ export function HistoricoEscalas({
           <div className="mb-3 flex flex-wrap gap-1.5">
             {codigosUsados.map((c) => {
               const def = ESCALAS[c]
+              if (!def) return null
               const oculta = escalasOcultas.has(c)
+              const cor = CORES[c] ?? '#64748b'
               return (
                 <button
                   key={c}
@@ -353,9 +373,9 @@ export function HistoricoEscalas({
                       ? 'border-slate-200 bg-white text-slate-400 line-through'
                       : 'border-slate-300 bg-white text-slate-700',
                   )}
-                  style={!oculta ? { borderColor: CORES[c], color: CORES[c] } : undefined}
+                  style={!oculta ? { borderColor: cor, color: cor } : undefined}
                 >
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: CORES[c] }} />
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: cor }} />
                   {def.nome}
                 </button>
               )
@@ -369,14 +389,14 @@ export function HistoricoEscalas({
               <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               {codigosUsados
-                .filter((c) => !escalasOcultas.has(c))
+                .filter((c) => !escalasOcultas.has(c) && ESCALAS[c])
                 .map((c) => (
                   <Line
                     key={c}
                     type="monotone"
                     dataKey={c}
-                    name={ESCALAS[c].nome}
-                    stroke={CORES[c]}
+                    name={ESCALAS[c]?.nome ?? c}
+                    stroke={CORES[c] ?? '#64748b'}
                     strokeWidth={2.5}
                     dot={{ r: 3 }}
                     connectNulls
@@ -408,6 +428,9 @@ export function HistoricoEscalas({
               <tbody className="divide-y divide-slate-100">
                 {registros.map((r) => {
                   const def = ESCALAS[r.codigo]
+                  if (!def) return null
+                  const cor = CORES[r.codigo] ?? '#64748b'
+                  const scoreMax = Array.isArray(def.scoreRange) ? def.scoreRange[1] : '?'
                   return (
                     <tr key={r.id} className="hover:bg-slate-50">
                       <td className="px-4 py-2.5 text-slate-600 text-xs whitespace-nowrap">
@@ -416,15 +439,15 @@ export function HistoricoEscalas({
                       <td className="px-4 py-2.5">
                         <span
                           className="inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
-                          style={{ backgroundColor: CORES[r.codigo] }}
+                          style={{ backgroundColor: cor }}
                         >
                           {def.nome}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 font-semibold text-slate-700">
-                        {r.score} <span className="text-xs text-slate-400">/ {def.scoreRange[1]}</span>
+                        {r.score} <span className="text-xs text-slate-400">/ {scoreMax}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600 text-xs">{r.classificacao}</td>
+                      <td className="px-4 py-2.5 text-slate-600 text-xs">{r.classificacao || '—'}</td>
                       <td className="px-4 py-2.5 text-slate-500 text-xs">{r.profissional ?? '—'}</td>
                     </tr>
                   )
