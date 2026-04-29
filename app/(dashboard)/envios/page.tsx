@@ -1,19 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import { useEffect, useMemo, useState } from 'react'
 import { Copy, Send, MessageCircle, Mail, Link2 } from 'lucide-react'
 import { IS_DEMO_MODE } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/client'
+import { subscribeTable } from '@/lib/supabase/realtime'
 import { cn } from '@/lib/utils'
-
-function uniqueChannelName(prefix: string): string {
-  const id =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
-  return `${prefix}-${id}`
-}
 
 interface EnvioRow {
   id: string
@@ -53,11 +45,9 @@ export default function EnviosPage() {
   const [filtro, setFiltro] = useState<'todos' | EnvioRow['status']>('todos')
   const [carregando, setCarregando] = useState(() => !IS_DEMO_MODE)
   const [erro, setErro] = useState<string | null>(null)
-  const channelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
     if (IS_DEMO_MODE) return
-    if (channelRef.current) return // já há canal ativo
 
     const supabase = createClient()
     let cancelado = false
@@ -76,18 +66,11 @@ export default function EnviosPage() {
 
     fetchEnvios()
 
-    const ch = supabase.channel(uniqueChannelName('envios'))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'envios_escalas' }, fetchEnvios)
-      .subscribe()
-
-    channelRef.current = ch
+    const unsubscribe = subscribeTable('envios_escalas', () => fetchEnvios())
 
     return () => {
       cancelado = true
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
-        channelRef.current = null
-      }
+      unsubscribe()
     }
   }, [])
 
