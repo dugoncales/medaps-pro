@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { MetricCard } from '@/components/shared/MetricCard'
 import { ProgressoProtocolo } from '@/components/shared/ProgressoProtocolo'
@@ -16,6 +17,14 @@ import { createClient } from '@/lib/supabase/client'
 import type { Alerta, Agendamento, LinhaCuidado } from '@/types'
 import { useContadores } from '../_components/use-contadores'
 import { calcularNpsAgregado, type RegistroPREM } from '@/lib/escalas/prems'
+
+function uniqueChannelName(prefix: string): string {
+  const id =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
+  return `${prefix}-${id}`
+}
 
 const STATUS_AGENDA: Record<string, { label: string; className: string }> = {
   confirmado: { label: 'Confirmado', className: 'bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]' },
@@ -43,9 +52,12 @@ export default function DashboardPage() {
   const [prems, setPrems] = useState<RegistroPREM[]>([])
   const [carregando, setCarregando] = useState<boolean>(() => !IS_DEMO_MODE)
   const [erroFetch, setErroFetch] = useState<string | null>(null)
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
     if (IS_DEMO_MODE) return
+    if (channelRef.current) return // já há canal ativo
+
     const supabase = createClient()
     let cancelado = false
 
@@ -105,14 +117,22 @@ export default function DashboardPage() {
 
     fetchTudo()
 
-    const ch = supabase.channel('painel-realtime')
+    const ch = supabase.channel(uniqueChannelName('painel'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agendamentos' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'linhas_cuidado' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'prems_aplicados' }, fetchTudo)
       .subscribe()
 
-    return () => { cancelado = true; supabase.removeChannel(ch) }
+    channelRef.current = ch
+
+    return () => {
+      cancelado = true
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
   }, [])
 
   const alertasUrgentes = useMemo(

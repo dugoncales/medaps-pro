@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import {
   IS_DEMO_MODE,
@@ -44,10 +45,19 @@ function contadoresDemo(extraPacientes = 0, extraLinhas = 0): Contadores {
  * Hook unificado de contadores. Em demo mode usa arrays in-memory
  * e o runtime-store; em modo real conecta ao Supabase com realtime.
  */
+function uniqueChannelName(prefix: string): string {
+  const id =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`
+  return `${prefix}-${id}`
+}
+
 export function useContadores(): Contadores {
   const pacientesRuntime = useRuntimeStore(s => s.pacientes)
   const linhasRuntime = useRuntimeStore(s => s.linhas)
   const [cReal, setCReal] = useState<Contadores>(() => contadoresDemo(0, 0))
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
   const cDemo = useMemo(
     () => contadoresDemo(pacientesRuntime.length, linhasRuntime.length),
@@ -56,6 +66,7 @@ export function useContadores(): Contadores {
 
   useEffect(() => {
     if (IS_DEMO_MODE) return
+    if (channelRef.current) return  // já tem canal ativo nesta instância
 
     const supabase = createClient()
     let cancelado = false
@@ -108,16 +119,21 @@ export function useContadores(): Contadores {
     fetchTudo()
 
     const ch = supabase
-      .channel('medaps-contadores')
+      .channel(uniqueChannelName('contadores'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pacientes' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'linhas_cuidado' }, fetchTudo)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'consultas' }, fetchTudo)
       .subscribe()
 
+    channelRef.current = ch
+
     return () => {
       cancelado = true
-      supabase.removeChannel(ch)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
     }
   }, [])
 
