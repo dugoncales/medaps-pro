@@ -16,6 +16,8 @@ export interface Toast {
   descricao?: string
   /** ms; default 6000. Use 0 para fixo até o usuário fechar */
   duracao?: number
+  /** Ação inline (ex.: "Desfazer"). Ao clicar, executa onClick e dispensa o toast. */
+  acao?: { label: string; onClick: () => void | Promise<void> }
 }
 
 interface ToastStore {

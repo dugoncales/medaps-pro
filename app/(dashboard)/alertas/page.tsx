@@ -1,47 +1,175 @@
 'use client'
 
-import { useState } from 'react'
-import { demoAlertas } from '@/lib/demo-data'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { IS_DEMO_MODE, demoAlertas } from '@/lib/demo-data'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { AlertaItem } from '@/components/shared/AlertaItem'
+import { createClient } from '@/lib/supabase/client'
+import { subscribeTable } from '@/lib/supabase/realtime'
+import { useToastStore } from '@/lib/store/toast-store'
+import {
+  destinoParaAlerta,
+  rotaParaAlerta,
+} from '@/lib/alertas/route-resolver'
 import type { Alerta } from '@/types'
 import { prioridadeToUI } from '@/types'
-import Link from 'next/link'
 
 export default function AlertasPage() {
-  const [alertas, setAlertas] = useState<Alerta[]>(demoAlertas)
+  const router = useRouter()
+  const pushToast = useToastStore((s) => s.push)
 
-  function resolver(id: string) {
-    setAlertas(prev => prev.map(a => a.id === id ? { ...a, resolvido: true } : a))
+  const [alertas, setAlertas] = useState<Alerta[]>(IS_DEMO_MODE ? demoAlertas : [])
+  const [carregando, setCarregando] = useState<boolean>(() => !IS_DEMO_MODE)
+  const [erro, setErro] = useState<string | null>(null)
+
+  // ─── Fetch real + realtime ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (IS_DEMO_MODE) return
+    let cancelado = false
+    const supabase = createClient()
+
+    async function fetchAlertas() {
+      try {
+        // RLS já restringe pela empresa do profissional logado.
+        const { data, error } = await supabase
+          .from('alertas')
+          .select('*, paciente:pacientes(nome, matricula)')
+          .eq('resolvido', false)
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        if (!cancelado) {
+          const lista = Array.isArray(data) ? (data as Alerta[]) : []
+          setAlertas(lista)
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Falha ao carregar alertas'
+        if (!cancelado) setErro(msg)
+        console.error('[alertas] fetch:', e)
+      } finally {
+        if (!cancelado) setCarregando(false)
+      }
+    }
+
+    fetchAlertas()
+    const unsubscribe = subscribeTable('alertas', () => {
+      if (!cancelado) fetchAlertas()
+    })
+
+    return () => {
+      cancelado = true
+      unsubscribe()
+    }
+  }, [])
+
+  // ─── Resolver com persistência + Desfazer ──────────────────────────────────
+  async function persistirResolvido(id: string, valor: boolean) {
+    if (IS_DEMO_MODE) return
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('alertas')
+      .update({
+        resolvido: valor,
+        resolved_at: valor ? new Date().toISOString() : null,
+      })
+      .eq('id', id)
+    if (error) {
+      console.error('[alertas] update:', error)
+      throw error
+    }
   }
 
-  const ativos = alertas.filter(a => !a.resolvido)
-  const urgentes = ativos.filter(a => prioridadeToUI(a.prioridade) === 'urgente')
-  const atencao = ativos.filter(a => prioridadeToUI(a.prioridade) === 'atencao')
-  const informativos = ativos.filter(a => prioridadeToUI(a.prioridade) === 'informativo')
+  async function desfazerResolver(alerta: Alerta) {
+    // Reverte: marca não resolvido novamente e devolve à lista
+    setAlertas((prev) => (prev.find((a) => a.id === alerta.id) ? prev : [{ ...alerta, resolvido: false }, ...prev]))
+    try {
+      await persistirResolvido(alerta.id, false)
+      pushToast({
+        tipo: 'info',
+        titulo: 'Resolução desfeita',
+        descricao: `O alerta de ${alerta.paciente?.nome ?? 'paciente'} voltou para a lista.`,
+      })
+    } catch {
+      // se o rollback falhar, removemos novamente
+      setAlertas((prev) => prev.filter((a) => a.id !== alerta.id))
+      pushToast({
+        tipo: 'critico',
+        titulo: 'Não foi possível desfazer',
+        descricao: 'Tente novamente em instantes.',
+      })
+    }
+  }
 
-  // Top 20 rastreamentos vencidos (exames atrasados)
-  const rastreamentosVencidos = ativos
-    .filter(a => a.tipo === 'exame_atrasado' || a.tipo === 'retorno_vencido')
-    .sort((a, b) => b.dias_atraso - a.dias_atraso)
-    .slice(0, 20)
+  function resolverEDirecionar(alerta: Alerta) {
+    const destino = destinoParaAlerta(alerta.tipo)
+    const rota = rotaParaAlerta(alerta.paciente_id, alerta.tipo)
+
+    // Otimista: tira da lista
+    setAlertas((prev) => prev.filter((a) => a.id !== alerta.id))
+
+    // Redireciona
+    router.push(rota)
+
+    // Persiste em background
+    persistirResolvido(alerta.id, true)
+      .then(() => {
+        pushToast({
+          tipo: 'sucesso',
+          titulo: 'Alerta resolvido',
+          descricao: `${alerta.paciente?.nome ?? 'Paciente'} — ${destino.rotuloAcao.replace(/\s*→\s*$/, '')}`,
+          duracao: 8000,
+          acao: { label: 'Desfazer', onClick: () => desfazerResolver(alerta) },
+        })
+      })
+      .catch(() => {
+        // rollback otimista — devolve à lista
+        setAlertas((prev) => (prev.find((a) => a.id === alerta.id) ? prev : [alerta, ...prev]))
+        pushToast({
+          tipo: 'critico',
+          titulo: 'Não foi possível resolver',
+          descricao: 'O alerta voltou para a lista. Tente novamente.',
+        })
+      })
+  }
+
+  // ─── Derivados ─────────────────────────────────────────────────────────────
+  const ativos = useMemo(() => (alertas ?? []).filter((a) => !a?.resolvido), [alertas])
+  const urgentes = useMemo(() => ativos.filter((a) => prioridadeToUI(a.prioridade) === 'urgente'), [ativos])
+  const atencao = useMemo(() => ativos.filter((a) => prioridadeToUI(a.prioridade) === 'atencao'), [ativos])
+  const informativos = useMemo(() => ativos.filter((a) => prioridadeToUI(a.prioridade) === 'informativo'), [ativos])
+
+  const rastreamentosVencidos = useMemo(
+    () =>
+      ativos
+        .filter((a) => a.tipo === 'exame_atrasado' || a.tipo === 'retorno_vencido')
+        .sort((a, b) => (b.dias_atraso ?? 0) - (a.dias_atraso ?? 0))
+        .slice(0, 20),
+    [ativos],
+  )
 
   return (
     <div className="space-y-6">
+      {/* Banner erro */}
+      {erro && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          ⚠️ {erro} — exibindo último estado conhecido.
+        </div>
+      )}
+
       {/* Contadores */}
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
-          <p className="text-3xl font-bold text-red-600">{urgentes.length}</p>
+          <p className="text-3xl font-bold text-red-600 num-tabular">{urgentes.length}</p>
           <p className="text-sm font-semibold text-red-700 mt-1">🚨 Urgente</p>
           <p className="text-xs text-red-500 mt-0.5">Ação imediata necessária</p>
         </div>
         <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 text-center">
-          <p className="text-3xl font-bold text-amber-600">{atencao.length}</p>
+          <p className="text-3xl font-bold text-amber-600 num-tabular">{atencao.length}</p>
           <p className="text-sm font-semibold text-amber-700 mt-1">⚠️ Atenção</p>
           <p className="text-xs text-amber-500 mt-0.5">Resolver em até 7 dias</p>
         </div>
         <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 text-center">
-          <p className="text-3xl font-bold text-emerald-600">{informativos.length}</p>
+          <p className="text-3xl font-bold text-emerald-600 num-tabular">{informativos.length}</p>
           <p className="text-sm font-semibold text-emerald-700 mt-1">ℹ️ Informativo</p>
           <p className="text-xs text-emerald-500 mt-0.5">Monitorar</p>
         </div>
@@ -49,44 +177,30 @@ export default function AlertasPage() {
 
       {/* Colunas Kanban */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Urgente */}
-        <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4">
-          <h2 className="mb-3 font-bold text-red-700">🚨 Urgente ({urgentes.length})</h2>
-          <div className="space-y-2">
-            {urgentes.length === 0 && (
-              <p className="text-sm text-red-400 text-center py-4">Nenhum alerta urgente. ✅</p>
-            )}
-            {urgentes.map(a => (
-              <AlertaItem key={a.id} alerta={a} onResolver={resolver} />
-            ))}
-          </div>
-        </div>
-
-        {/* Atenção */}
-        <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4">
-          <h2 className="mb-3 font-bold text-amber-700">⚠️ Atenção ({atencao.length})</h2>
-          <div className="space-y-2">
-            {atencao.length === 0 && (
-              <p className="text-sm text-amber-400 text-center py-4">Nenhum alerta de atenção.</p>
-            )}
-            {atencao.map(a => (
-              <AlertaItem key={a.id} alerta={a} onResolver={resolver} />
-            ))}
-          </div>
-        </div>
-
-        {/* Informativo */}
-        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4">
-          <h2 className="mb-3 font-bold text-emerald-700">ℹ️ Informativo ({informativos.length})</h2>
-          <div className="space-y-2">
-            {informativos.length === 0 && (
-              <p className="text-sm text-emerald-400 text-center py-4">Nenhum informativo.</p>
-            )}
-            {informativos.map(a => (
-              <AlertaItem key={a.id} alerta={a} onResolver={resolver} />
-            ))}
-          </div>
-        </div>
+        <ColunaAlertas
+          titulo="🚨 Urgente"
+          cor="red"
+          alertas={urgentes}
+          carregando={carregando}
+          vazioMsg="Nenhum alerta urgente. ✅"
+          onResolver={resolverEDirecionar}
+        />
+        <ColunaAlertas
+          titulo="⚠️ Atenção"
+          cor="amber"
+          alertas={atencao}
+          carregando={carregando}
+          vazioMsg="Nenhum alerta de atenção."
+          onResolver={resolverEDirecionar}
+        />
+        <ColunaAlertas
+          titulo="ℹ️ Informativo"
+          cor="emerald"
+          alertas={informativos}
+          carregando={carregando}
+          vazioMsg="Nenhum informativo."
+          onResolver={resolverEDirecionar}
+        />
       </div>
 
       {/* Rastreamentos vencidos — Top 20 */}
@@ -112,18 +226,18 @@ export default function AlertasPage() {
               {rastreamentosVencidos.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    Nenhum rastreamento vencido. ✅
+                    {carregando ? 'Carregando…' : 'Nenhum rastreamento vencido. ✅'}
                   </td>
                 </tr>
               )}
-              {rastreamentosVencidos.map(a => {
+              {rastreamentosVencidos.map((a) => {
                 const prot = PROTOCOLO_MAP.get(a.protocolo_codigo)
                 const prio = prioridadeToUI(a.prioridade)
                 return (
                   <tr key={a.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-slate-800">{a.paciente?.nome}</div>
-                      <div className="text-xs text-slate-400">{a.paciente?.matricula}</div>
+                      <div className="font-medium text-slate-800">{a.paciente?.nome ?? '—'}</div>
+                      <div className="text-xs text-slate-400">{a.paciente?.matricula ?? ''}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -140,28 +254,37 @@ export default function AlertasPage() {
                       {a.data_vencimento ? new Date(a.data_vencimento).toLocaleDateString('pt-BR') : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`font-bold text-sm ${
-                        a.dias_atraso >= 30 ? 'text-red-600' :
-                        a.dias_atraso >= 14 ? 'text-amber-600' : 'text-slate-600'
-                      }`}>
-                        {a.dias_atraso}d
+                      <span
+                        className={`font-bold text-sm num-tabular ${
+                          (a.dias_atraso ?? 0) >= 30
+                            ? 'text-red-600'
+                            : (a.dias_atraso ?? 0) >= 14
+                              ? 'text-amber-600'
+                              : 'text-slate-600'
+                        }`}
+                      >
+                        {a.dias_atraso ?? 0}d
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        prio === 'urgente' ? 'bg-red-100 text-red-700' :
-                        prio === 'atencao' ? 'bg-amber-100 text-amber-700' :
-                        'bg-emerald-100 text-emerald-700'
-                      }`}>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                          prio === 'urgente'
+                            ? 'bg-red-100 text-red-700'
+                            : prio === 'atencao'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-emerald-100 text-emerald-700'
+                        }`}
+                      >
                         {prio}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => resolver(a.id)}
-                        className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200"
+                        onClick={() => resolverEDirecionar(a)}
+                        className="rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
                       >
-                        Resolver
+                        {destinoParaAlerta(a.tipo).rotuloAcao}
                       </button>
                     </td>
                   </tr>
@@ -170,6 +293,49 @@ export default function AlertasPage() {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Coluna Kanban ───────────────────────────────────────────────────────────
+
+interface ColunaProps {
+  titulo: string
+  cor: 'red' | 'amber' | 'emerald'
+  alertas: Alerta[]
+  carregando: boolean
+  vazioMsg: string
+  onResolver: (alerta: Alerta) => void
+}
+
+function ColunaAlertas({ titulo, cor, alertas, carregando, vazioMsg, onResolver }: ColunaProps) {
+  const styles = {
+    red:     { bg: 'bg-red-50',     border: 'border-red-200',     title: 'text-red-700',     muted: 'text-red-400' },
+    amber:   { bg: 'bg-amber-50',   border: 'border-amber-200',   title: 'text-amber-700',   muted: 'text-amber-400' },
+    emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', title: 'text-emerald-700', muted: 'text-emerald-400' },
+  }[cor]
+
+  return (
+    <div className={`rounded-xl border-2 ${styles.border} ${styles.bg} p-4`}>
+      <h2 className={`mb-3 font-bold ${styles.title}`}>
+        {titulo} ({alertas.length})
+      </h2>
+      <div className="space-y-2">
+        {carregando ? (
+          <p className={`text-sm ${styles.muted} text-center py-4 animate-pulse`}>Carregando…</p>
+        ) : alertas.length === 0 ? (
+          <p className={`text-sm ${styles.muted} text-center py-4`}>{vazioMsg}</p>
+        ) : (
+          alertas.map((a) => (
+            <AlertaItem
+              key={a.id}
+              alerta={a}
+              onResolver={onResolver}
+              resolverLabel={destinoParaAlerta(a.tipo).rotuloAcao}
+            />
+          ))
+        )}
       </div>
     </div>
   )

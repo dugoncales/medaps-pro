@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, demoProfissional, getConsultasByPaciente, getExamesByPaciente, getAlertasByPaciente, calcularIdade, IS_DEMO_MODE } from '@/lib/demo-data'
 import { useRuntimeStore } from '@/lib/store/runtime-store'
 import { createClient } from '@/lib/supabase/client'
@@ -258,9 +258,24 @@ function normalizarLinhas(linhas: LinhaCuidado[]): LinhaCuidado[] {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+const TABS_VALIDAS = ['resumo', 'jornada', 'consultas', 'evolucao', 'escalas', 'exames', 'alertas'] as const
+type TabValue = typeof TABS_VALIDAS[number]
+
+function tabFromQuery(raw: string | null): TabValue {
+  if (raw && (TABS_VALIDAS as readonly string[]).includes(raw)) return raw as TabValue
+  return 'resumo'
+}
+
 export default function PacientePage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const id = params.id as string
+
+  // Aba inicial vinda do query (?tab=escalas etc.). Lemos uma vez no mount —
+  // useState initializer resolve antes do primeiro render, sem setState em effect.
+  const [tabAtual, setTabAtual] = useState<TabValue>(() => tabFromQuery(searchParams?.get('tab') ?? null))
+  const abrirAgendarNoMount = (searchParams?.get('agendar') ?? '') === '1'
+
   const [jornadas, setJornadas] = useState<StatusJornada[]>([])
   const [jornadasCarregando, setJornadasCarregando] = useState(true)
 
@@ -272,7 +287,9 @@ export default function PacientePage() {
   const [carregandoPaciente, setCarregandoPaciente] = useState(!IS_DEMO_MODE)
   const [editarAberto, setEditarAberto] = useState(false)
   const [adicionarLinhaAberto, setAdicionarLinhaAberto] = useState(false)
-  const [agendarAberto, setAgendarAberto] = useState<{ protocoloSugerido?: string } | null>(null)
+  const [agendarAberto, setAgendarAberto] = useState<{ protocoloSugerido?: string } | null>(
+    () => (abrirAgendarNoMount ? {} : null),
+  )
 
   useEffect(() => {
     if (IS_DEMO_MODE || !id) return
@@ -463,7 +480,7 @@ export default function PacientePage() {
       />
 
       {/* Tabs */}
-      <Tabs defaultValue="resumo">
+      <Tabs value={tabAtual} onValueChange={(v) => setTabAtual(v as TabValue)}>
         <TabsList className="w-full justify-start border-b border-slate-200 bg-transparent rounded-none p-0 gap-0 flex-wrap h-auto">
           {['resumo', 'jornada', 'consultas', 'evolucao', 'escalas', 'exames', 'alertas'].map(tab => (
             <TabsTrigger

@@ -98,12 +98,24 @@ export interface ExameResultado {
   created_at: string
 }
 
+export type AlertaTipo =
+  | 'retorno_vencido'
+  | 'exame_atrasado'
+  | 'meta_nao_atingida'
+  | 'urgencia'
+  | 'phq9_critico'
+  | 'risco_suicidio'
+  | 'gad7_critico'
+  | 'cat_critico'
+  | 'audit_critico'
+  | 'paciente_detrator'
+
 export interface Alerta {
   id: string
   paciente_id: string
   empresa_id: string
   protocolo_codigo: string
-  tipo: 'retorno_vencido' | 'exame_atrasado' | 'meta_nao_atingida' | 'urgencia'
+  tipo: AlertaTipo
   prioridade: 'baixa' | 'media' | 'alta' | 'critica'
   titulo: string
   descricao?: string
@@ -112,6 +124,7 @@ export interface Alerta {
   resolvido: boolean
   created_at: string
   resolved_at?: string
+  metadata?: Record<string, unknown> | null
   paciente?: Pick<Paciente, 'nome' | 'matricula'>
 }
 

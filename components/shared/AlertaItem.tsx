@@ -1,11 +1,14 @@
 import { cn } from '@/lib/utils'
-import type { Alerta } from '@/types'
+import type { Alerta, AlertaTipo } from '@/types'
 import { prioridadeToUI } from '@/types'
 
 interface AlertaItemProps {
   alerta: Alerta
-  onResolver?: (id: string) => void
+  /** Recebe o objeto inteiro pra permitir roteamento por tipo */
+  onResolver?: (alerta: Alerta) => void
   compact?: boolean
+  /** Texto do botão. Default: "Resolver" */
+  resolverLabel?: string
 }
 
 const PRIORIDADE_STYLE = {
@@ -14,16 +17,23 @@ const PRIORIDADE_STYLE = {
   informativo: { borderL: '#059669', badge: 'bg-[#ECFDF5] text-[#065F46] border-[#A7F3D0]', dot: 'bg-[#059669]' },
 }
 
-const TIPO_LABEL: Record<Alerta['tipo'], string> = {
-  retorno_vencido: 'Retorno vencido',
-  exame_atrasado: 'Exame atrasado',
+const TIPO_LABEL: Record<AlertaTipo, string> = {
+  retorno_vencido:   'Retorno vencido',
+  exame_atrasado:    'Exame atrasado',
   meta_nao_atingida: 'Meta não atingida',
-  urgencia: 'Urgência',
+  urgencia:          'Urgência',
+  phq9_critico:      'PHQ-9 crítico',
+  risco_suicidio:    'Risco de suicídio',
+  gad7_critico:      'GAD-7 crítico',
+  cat_critico:       'CAT crítico',
+  audit_critico:     'AUDIT crítico',
+  paciente_detrator: 'NPS detrator',
 }
 
-export function AlertaItem({ alerta, onResolver, compact }: AlertaItemProps) {
+export function AlertaItem({ alerta, onResolver, compact, resolverLabel }: AlertaItemProps) {
   const prioridade = prioridadeToUI(alerta.prioridade)
   const style = PRIORIDADE_STYLE[prioridade]
+  const label = TIPO_LABEL[alerta.tipo] ?? 'Alerta'
 
   return (
     <div
@@ -48,7 +58,7 @@ export function AlertaItem({ alerta, onResolver, compact }: AlertaItemProps) {
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', style.badge)}>
-            {TIPO_LABEL[alerta.tipo]}
+            {label}
           </span>
           {alerta.dias_atraso > 0 && (
             <span className="text-[10px] text-[#9CA3AF] font-medium">{alerta.dias_atraso}d atraso</span>
@@ -57,10 +67,10 @@ export function AlertaItem({ alerta, onResolver, compact }: AlertaItemProps) {
       </div>
       {onResolver && (
         <button
-          onClick={() => onResolver(alerta.id)}
+          onClick={() => onResolver(alerta)}
           className="mt-2.5 w-full rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs font-semibold text-[#6B7280] hover:bg-[#F9FAFB] hover:text-[#111827] transition-colors"
         >
-          Resolver
+          {resolverLabel ?? 'Resolver →'}
         </button>
       )}
     </div>

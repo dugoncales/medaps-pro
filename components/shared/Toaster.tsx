@@ -60,6 +60,17 @@ export function Toaster() {
               {t.descricao && (
                 <p className={cn('mt-1 text-xs leading-snug', e.corCorpo)}>{t.descricao}</p>
               )}
+              {t.acao && (
+                <button
+                  onClick={async () => {
+                    try { await t.acao!.onClick() } catch (err) { console.error('[toast] acao:', err) }
+                    dismiss(t.id)
+                  }}
+                  className="mt-2 inline-flex rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  {t.acao.label}
+                </button>
+              )}
             </div>
             <button
               onClick={() => dismiss(t.id)}
