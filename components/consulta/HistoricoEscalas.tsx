@@ -135,7 +135,15 @@ interface HistoricoEscalasProps {
 export function HistoricoEscalas({
   pacienteId, pacienteNome, protocolosAtivos, consultas, profissionalNome, empresaId, profissionalId,
 }: HistoricoEscalasProps) {
-  const aplicacoes = useRuntimeStore((s) => s.escalasPorPaciente(pacienteId))
+  // ATENÇÃO: NÃO usar useRuntimeStore((s) => s.escalasPorPaciente(pacienteId))
+  // — esse seletor cria array novo a cada chamada → zustand dispara re-render
+  // → loop infinito (React error #185). Sempre selecionar a coleção bruta e
+  // derivar com useMemo.
+  const todasEscalas = useRuntimeStore((s) => s.escalas)
+  const aplicacoes = useMemo(
+    () => todasEscalas.filter((e) => e.paciente_id === pacienteId),
+    [todasEscalas, pacienteId],
+  )
   const adicionarEscala = useRuntimeStore((s) => s.adicionarEscala)
   const pushToast = useToastStore((s) => s.push)
 
