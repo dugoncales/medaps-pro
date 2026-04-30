@@ -23,8 +23,22 @@ import {
   ESCALAS, ESCALAS_LIST, calcularResultado, getEscalasParaProtocolos,
   type EscalaCodigo, type ResultadoEscala, type EscalaSugestao,
 } from '@/lib/escalas/ichom'
+import { useToastStore } from '@/lib/store/toast-store'
 import { cn } from '@/lib/utils'
 import type { StatusControle } from '@/types'
+
+// Linha pronta pra INSERT em proms_aplicados
+interface PromInsert {
+  empresa_id: string
+  paciente_id: string
+  profissional_id: string | null
+  consulta_id: string | null
+  codigo: EscalaCodigo
+  respostas: Record<string, number>
+  score: number
+  classificacao: string
+  origem: 'presencial'
+}
 
 // ── Vitais ───────────────────────────────────────────────────
 interface Vitais {
@@ -721,10 +735,102 @@ export default function ConsultaPage() {
   const [escalasRespostas, setEscalasRespostas] = useState<Partial<Record<EscalaCodigo, Record<string, number>>>>({})
   const [mostrarMaisEscalas, setMostrarMaisEscalas] = useState(false)
   const [mostrarPrem, setMostrarPrem] = useState(false)
+  // Códigos de escalas já persistidas em proms_aplicados nesta sessão
+  // (via botão "Salvar PROMs" ou via finalizarConsulta).
+  const [promsJaSalvos, setPromsJaSalvos] = useState<Set<EscalaCodigo>>(new Set())
+  const [salvandoProms, setSalvandoProms] = useState(false)
+  const pushToast = useToastStore((s) => s.push)
 
   const imc = calcIMC(vitais.peso, vitais.altura)
   const paAlert = alertaPA(vitais.pa1_s, vitais.pa1_d)
   const glicAlert = alertaGlicemia(vitais.glicemia)
+
+  // Lista de escalas COMPLETAS na sessão atual (todas perguntas respondidas)
+  const escalasCompletas: EscalaCodigo[] = (() => {
+    const out: EscalaCodigo[] = []
+    for (const cod of escalasAtivas) {
+      const def = ESCALAS[cod]
+      const respostas = escalasRespostas[cod]
+      if (!def || !respostas) continue
+      const completa = def.perguntas.every((p) => respostas[p.id] !== undefined && respostas[p.id] !== null)
+      if (completa) out.push(cod)
+    }
+    return out
+  })()
+
+  // Quantas ainda não foram persistidas em proms_aplicados
+  const escalasPendentes = escalasCompletas.filter((cod) => !promsJaSalvos.has(cod))
+
+  /**
+   * Insere em proms_aplicados as escalas listadas. Falha por linha não
+   * bloqueia o restante. Retorna a lista de códigos efetivamente persistidos.
+   */
+  async function inserirProms(
+    codigos: EscalaCodigo[],
+    consultaId: string | null,
+  ): Promise<EscalaCodigo[]> {
+    if (IS_DEMO_MODE) return codigos // em demo, considera como salvo
+    if (!paciente?.empresa_id) return []
+
+    const supabase = createClient()
+    const linhas: PromInsert[] = []
+    for (const cod of codigos) {
+      const respostas = escalasRespostas[cod]
+      if (!respostas) continue
+      const resultado = calcularResultado(cod, respostas)
+      linhas.push({
+        empresa_id: paciente.empresa_id,
+        paciente_id: id,
+        profissional_id: demoProfissional.id ?? null,
+        consulta_id: consultaId,
+        codigo: cod,
+        respostas,
+        score: resultado.score,
+        classificacao: resultado.classificacao,
+        origem: 'presencial',
+      })
+    }
+    if (linhas.length === 0) return []
+
+    try {
+      const { error } = await supabase.from('proms_aplicados').insert(linhas)
+      if (error) {
+        console.error('[consulta] insert proms_aplicados:', error)
+        return []
+      }
+      return linhas.map((l) => l.codigo)
+    } catch (e) {
+      console.error('[consulta] proms_aplicados:', e)
+      return []
+    }
+  }
+
+  async function salvarPromsBatch() {
+    if (escalasPendentes.length === 0 || salvandoProms) return
+    setSalvandoProms(true)
+    const persistidos = await inserirProms(escalasPendentes, null)
+    setSalvandoProms(false)
+
+    if (persistidos.length === 0) {
+      pushToast({
+        tipo: 'critico',
+        titulo: 'Não foi possível salvar as escalas',
+        descricao: 'Tente novamente em instantes.',
+      })
+      return
+    }
+
+    setPromsJaSalvos((prev) => {
+      const next = new Set(prev)
+      for (const cod of persistidos) next.add(cod)
+      return next
+    })
+    pushToast({
+      tipo: 'sucesso',
+      titulo: `${persistidos.length} escala${persistidos.length > 1 ? 's salvas' : ' salva'}`,
+      descricao: persistidos.map((c) => ESCALAS[c]?.nome ?? c).join(' · '),
+    })
+  }
 
   function setMetricaProtocolo(protocolo: string, chave: string, valor: string | boolean) {
     setMetricas(m => ({
@@ -808,6 +914,23 @@ export default function ConsultaPage() {
       const completa = def.perguntas.every(p => respostas[p.id] !== undefined && respostas[p.id] !== null)
       if (completa) {
         escalasJsonb[cod] = calcularResultado(cod, respostas)
+      }
+    }
+
+    // Persiste PROMs pendentes em proms_aplicados.
+    // consulta_id permanece null porque o INSERT da própria consulta não
+    // está implementado neste fluxo ainda; quando for, basta passar o id
+    // retornado aqui em vez de null.
+    const codigosCompletos = Object.keys(escalasJsonb) as EscalaCodigo[]
+    const aPersistir = codigosCompletos.filter((c) => !promsJaSalvos.has(c))
+    if (aPersistir.length > 0) {
+      const persistidos = await inserirProms(aPersistir, null)
+      if (persistidos.length > 0) {
+        setPromsJaSalvos((prev) => {
+          const next = new Set(prev)
+          for (const cod of persistidos) next.add(cod)
+          return next
+        })
       }
     }
 
@@ -1109,15 +1232,36 @@ export default function ConsultaPage() {
         {/* Seção 3.5 — PROMs / Escalas ICHOM */}
         <TabsContent value="proms" className="pt-4">
           <div className="space-y-4">
-            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-              <h3 className="font-semibold text-blue-800 text-sm">📊 Patient-Reported Outcome Measures (PROMs)</h3>
-              <p className="text-xs text-blue-600 mt-0.5">
-                Escalas filtradas pelos protocolos ativos do paciente
-                {protocolosAtivos.length > 0 && (
-                  <> ({protocolosAtivos.join(' · ')})</>
-                )}.
-                Itens marcados como <span className="font-semibold">Obrigatória</span> compõem o conjunto padrão ICHOM.
-              </p>
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-blue-800 text-sm">📊 Patient-Reported Outcome Measures (PROMs)</h3>
+                <p className="text-xs text-blue-600 mt-0.5">
+                  Escalas filtradas pelos protocolos ativos do paciente
+                  {protocolosAtivos.length > 0 && (
+                    <> ({protocolosAtivos.join(' · ')})</>
+                  )}.
+                  Itens marcados como <span className="font-semibold">Obrigatória</span> compõem o conjunto padrão ICHOM.
+                </p>
+                {(escalasCompletas.length > 0 || promsJaSalvos.size > 0) && (
+                  <p className="text-[11px] text-blue-700 mt-1.5 font-medium">
+                    {escalasCompletas.length} preenchida{escalasCompletas.length !== 1 ? 's' : ''}
+                    {' · '}
+                    {promsJaSalvos.size} salva{promsJaSalvos.size !== 1 ? 's' : ''}
+                    {escalasPendentes.length > 0 && ` · ${escalasPendentes.length} pendente${escalasPendentes.length !== 1 ? 's' : ''}`}
+                  </p>
+                )}
+              </div>
+              <Button
+                onClick={salvarPromsBatch}
+                disabled={escalasPendentes.length === 0 || salvandoProms}
+                className="shrink-0 bg-blue-600 hover:bg-blue-500"
+              >
+                {salvandoProms
+                  ? 'Salvando…'
+                  : escalasPendentes.length === 0
+                    ? '✓ Tudo salvo'
+                    : `💾 Salvar ${escalasPendentes.length} PROM${escalasPendentes.length > 1 ? 's' : ''}`}
+              </Button>
             </div>
 
             {/* Sugestões clínicas */}
