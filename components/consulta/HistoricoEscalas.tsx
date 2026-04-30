@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
@@ -13,9 +13,23 @@ import { ESCALAS, type EscalaCodigo, type ResultadoEscala } from '@/lib/escalas/
 import { avaliarAlertaCriticoPROM, tituloToastSucesso } from '@/lib/escalas/alertas-criticos'
 import { useToastStore } from '@/lib/store/toast-store'
 import { createClient } from '@/lib/supabase/client'
+import { subscribeTable } from '@/lib/supabase/realtime'
 import { IS_DEMO_MODE } from '@/lib/demo-data'
 import { cn } from '@/lib/utils'
 import type { Consulta } from '@/types'
+
+// Linha em proms_aplicados (banco) — campos relevantes para reconstruir o registro
+interface PromAplicadoRow {
+  id: string
+  paciente_id: string
+  codigo: string
+  score: number | null
+  classificacao: string | null
+  respostas: Record<string, number>
+  data_aplicacao: string
+  profissional_id?: string | null
+  origem: 'presencial' | 'remoto'
+}
 
 // ─── Normalização ────────────────────────────────────────────────────────────
 
@@ -43,6 +57,7 @@ const LEGACY_KEY_MAP: Record<string, EscalaCodigo> = {
 function obterRegistros(
   consultas: Consulta[] | undefined | null,
   aplicacoesStore: AplicacaoEscala[] | undefined | null,
+  promsServidor: PromAplicadoRow[] | undefined | null,
 ): RegistroEscala[] {
   const registros: RegistroEscala[] = []
 
@@ -89,7 +104,7 @@ function obterRegistros(
     }
   }
 
-  // Fonte runtime — store com aplicações isoladas
+  // Fonte runtime — store com aplicações isoladas (apenas demo / fallback offline)
   for (const ap of aplicacoesStore ?? []) {
     if (!ap?.codigo || !ESCALAS[ap.codigo]) continue
     const score = Number(ap.resultado?.score)
@@ -105,7 +120,39 @@ function obterRegistros(
     })
   }
 
-  return registros.sort((a, b) => b.data.getTime() - a.data.getTime())
+  // Fonte servidor — proms_aplicados do Supabase (modo real)
+  for (const p of promsServidor ?? []) {
+    const codigo = p?.codigo as EscalaCodigo
+    if (!codigo || !ESCALAS[codigo]) continue
+    const score = Number(p.score)
+    if (!Number.isFinite(score)) continue
+    registros.push({
+      id: `srv-${p.id}`,
+      codigo,
+      score,
+      classificacao: p.classificacao ?? '',
+      data: new Date(p.data_aplicacao),
+    })
+  }
+
+  // Dedupe por (codigo, data ISO até segundo) — store local pode ter o mesmo registro
+  // que já está no servidor (write-through cache). Preferimos a versão do servidor.
+  const seen = new Set<string>()
+  const dedup: RegistroEscala[] = []
+  // Servidor primeiro pra ter precedência
+  for (const r of registros.filter((r) => r.id.startsWith('srv-'))) {
+    const k = `${r.codigo}|${r.data.toISOString().slice(0, 19)}`
+    seen.add(k)
+    dedup.push(r)
+  }
+  for (const r of registros.filter((r) => !r.id.startsWith('srv-'))) {
+    const k = `${r.codigo}|${r.data.toISOString().slice(0, 19)}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    dedup.push(r)
+  }
+
+  return dedup.sort((a, b) => b.data.getTime() - a.data.getTime())
 }
 
 // ─── Cores por código ────────────────────────────────────────────────────────
@@ -150,10 +197,42 @@ export function HistoricoEscalas({
   const [modalAberto, setModalAberto] = useState(false)
   const [escalasOcultas, setEscalasOcultas] = useState<Set<EscalaCodigo>>(new Set())
   const [enviarAberto, setEnviarAberto] = useState<{ codigo: EscalaCodigo } | null>(null)
+  const [promsServidor, setPromsServidor] = useState<PromAplicadoRow[]>([])
+
+  // Fetch de proms_aplicados do Supabase (apenas modo real). Realtime via singleton.
+  useEffect(() => {
+    if (IS_DEMO_MODE) return
+    let cancelado = false
+    const supabase = createClient()
+
+    async function fetchProms() {
+      try {
+        const { data, error } = await supabase
+          .from('proms_aplicados')
+          .select('id, paciente_id, codigo, score, classificacao, respostas, data_aplicacao, profissional_id, origem')
+          .eq('paciente_id', pacienteId)
+          .order('data_aplicacao', { ascending: false })
+        if (error) throw error
+        if (!cancelado) setPromsServidor(Array.isArray(data) ? (data as PromAplicadoRow[]) : [])
+      } catch (e) {
+        console.warn('[HistoricoEscalas] fetch proms_aplicados:', e)
+      }
+    }
+
+    fetchProms()
+    const unsubscribe = subscribeTable('proms_aplicados', () => {
+      if (!cancelado) fetchProms()
+    })
+
+    return () => {
+      cancelado = true
+      unsubscribe()
+    }
+  }, [pacienteId])
 
   const registros = useMemo(
-    () => obterRegistros(consultas, aplicacoes),
-    [consultas, aplicacoes],
+    () => obterRegistros(consultas, aplicacoes, promsServidor),
+    [consultas, aplicacoes, promsServidor],
   )
 
   // Card por código — última aplicação + delta
@@ -196,6 +275,7 @@ export function HistoricoEscalas({
   }, [registros])
 
   async function handleSubmitEscala(codigo: EscalaCodigo, resultado: ResultadoEscala) {
+    // 1. Cache local (zustand) — UI instantânea, demo mode, fallback offline
     adicionarEscala({
       id: gerarId('ap'),
       paciente_id: pacienteId,
@@ -204,7 +284,6 @@ export function HistoricoEscalas({
       profissional_nome: profissionalNome,
       data: new Date().toISOString(),
     })
-    setModalAberto(false)
 
     const alerta = avaliarAlertaCriticoPROM(codigo, {
       score: resultado.score,
@@ -212,30 +291,49 @@ export function HistoricoEscalas({
       respostas: resultado.respostas,
     })
 
-    // Persiste alerta no Supabase quando em modo real e há critério crítico
-    if (alerta && !IS_DEMO_MODE && empresaId) {
+    // 2. Persiste no Supabase em paralelo (PROM + alerta crítico, se houver)
+    if (!IS_DEMO_MODE && empresaId) {
+      const supabase = createClient()
+
       try {
-        const supabase = createClient()
-        const { error } = await supabase.from('alertas').insert({
-          paciente_id: pacienteId,
+        const { error: errProm } = await supabase.from('proms_aplicados').insert({
           empresa_id: empresaId,
-          protocolo_codigo: ESCALAS[codigo].protocolosRelacionados[0] ?? 'GERAL',
-          tipo: alerta.tipo,
-          prioridade: alerta.prioridade,
-          titulo: alerta.titulo,
-          descricao: alerta.descricao,
-          dias_atraso: 0,
-          metadata: {
-            origem: 'presencial',
-            escala_codigo: codigo,
-            score: resultado.score,
-            classificacao: resultado.classificacao,
-            data_aplicacao: new Date().toISOString(),
-          },
+          paciente_id: pacienteId,
+          profissional_id: profissionalId ?? null,
+          codigo,
+          respostas: resultado.respostas,
+          score: resultado.score,
+          classificacao: resultado.classificacao,
+          origem: 'presencial',
         })
-        if (error) console.error('[HistoricoEscalas] insert alerta:', error)
+        if (errProm) console.error('[HistoricoEscalas] insert proms_aplicados:', errProm)
       } catch (e) {
-        console.error('[HistoricoEscalas] alerta:', e)
+        console.error('[HistoricoEscalas] proms_aplicados:', e)
+      }
+
+      if (alerta) {
+        try {
+          const { error: errAlerta } = await supabase.from('alertas').insert({
+            paciente_id: pacienteId,
+            empresa_id: empresaId,
+            protocolo_codigo: ESCALAS[codigo].protocolosRelacionados[0] ?? 'GERAL',
+            tipo: alerta.tipo,
+            prioridade: alerta.prioridade,
+            titulo: alerta.titulo,
+            descricao: alerta.descricao,
+            dias_atraso: 0,
+            metadata: {
+              origem: 'presencial',
+              escala_codigo: codigo,
+              score: resultado.score,
+              classificacao: resultado.classificacao,
+              data_aplicacao: new Date().toISOString(),
+            },
+          })
+          if (errAlerta) console.error('[HistoricoEscalas] insert alerta:', errAlerta)
+        } catch (e) {
+          console.error('[HistoricoEscalas] alerta:', e)
+        }
       }
     }
 
@@ -470,6 +568,10 @@ export function HistoricoEscalas({
         aberto={modalAberto}
         onFechar={() => setModalAberto(false)}
         onSubmit={handleSubmitEscala}
+        onEnviar={empresaId ? (codigo) => {
+          setModalAberto(false)
+          setEnviarAberto({ codigo })
+        } : undefined}
         protocolosAtivos={protocolosAtivos}
       />
     </div>

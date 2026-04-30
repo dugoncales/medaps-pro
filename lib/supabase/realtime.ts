@@ -28,6 +28,7 @@ export type RealtimeTable =
   | 'agendamentos'
   | 'envios_escalas'
   | 'prems_aplicados'
+  | 'proms_aplicados'
 
 const TABLES: RealtimeTable[] = [
   'pacientes',
@@ -37,6 +38,7 @@ const TABLES: RealtimeTable[] = [
   'agendamentos',
   'envios_escalas',
   'prems_aplicados',
+  'proms_aplicados',
 ]
 
 type AnyPayload = RealtimePostgresChangesPayload<Record<string, unknown>>
