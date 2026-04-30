@@ -225,6 +225,37 @@ function JornadaTab({
   )
 }
 
+// ─── Normalizadores ──────────────────────────────────────────────────────────
+//
+// Postgres pode retornar null em campos onde o schema esperava DEFAULT
+// quando a linha foi inserida antes da coluna existir, ou se um cliente
+// passou null explícito. Normalizamos no boundary (fetch) para que o resto
+// do componente trabalhe com tipos não-nulos.
+
+function normalizarPaciente(p: Paciente | null): Paciente | null {
+  if (!p) return null
+  return {
+    ...p,
+    nome: p.nome ?? '',
+    matricula: p.matricula ?? '',
+    setor: p.setor ?? undefined,
+    comorbidades: Array.isArray(p.comorbidades) ? p.comorbidades : [],
+    medicamentos_uso: p.medicamentos_uso ?? undefined,
+    tabagismo_status: p.tabagismo_status ?? undefined,
+  }
+}
+
+function normalizarLinhas(linhas: LinhaCuidado[]): LinhaCuidado[] {
+  return linhas
+    .filter(l => l && typeof l.protocolo_codigo === 'string')
+    .map(l => ({
+      ...l,
+      status: l.status ?? 'ativo',
+      // nivel_gravidade pode ser null — deixamos como undefined pra simplificar guards
+      nivel_gravidade: l.nivel_gravidade ?? undefined,
+    }))
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PacientePage() {
@@ -262,8 +293,8 @@ export default function PacientePage() {
       if (errL) console.error('[Paciente] fetch linhas:', errL)
 
       if (!cancelado) {
-        setSupabasePaciente((pac as Paciente | null) ?? null)
-        setSupabaseLinhas((lins ?? []) as LinhaCuidado[])
+        setSupabasePaciente(normalizarPaciente(pac as Paciente | null))
+        setSupabaseLinhas(normalizarLinhas((lins ?? []) as LinhaCuidado[]))
         setCarregandoPaciente(false)
       }
     })()
@@ -350,10 +381,10 @@ export default function PacientePage() {
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-xl font-bold text-white">
-            {paciente.nome.split(' ').slice(0, 2).map(n => n[0]).join('')}
+            {(paciente.nome ?? '').split(' ').filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase() || '?'}
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-800">{paciente.nome}</h1>
+            <h1 className="text-xl font-bold text-slate-800">{paciente.nome ?? '—'}</h1>
             <p className="text-sm text-slate-500">
               {formatMatricula(paciente.matricula)} · {idade} anos · {paciente.setor?.trim() || 'Setor não informado'}
               {paciente.tabagismo_status === 'atual' && ' · 🚬 Tabagista'}
@@ -411,9 +442,9 @@ export default function PacientePage() {
         aberto={adicionarLinhaAberto}
         onFechar={() => setAdicionarLinhaAberto(false)}
         pacienteId={id}
-        pacienteNome={paciente.nome}
+        pacienteNome={paciente.nome ?? ''}
         profissionalId={demoProfissional.id}
-        protocolosJaAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo)}
+        protocolosJaAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo).filter(Boolean)}
         onAdicionado={(linha) => setSupabaseLinhas(prev => [...prev, linha])}
       />
 
@@ -421,8 +452,8 @@ export default function PacientePage() {
         aberto={agendarAberto !== null}
         onFechar={() => setAgendarAberto(null)}
         pacienteId={id}
-        pacienteNome={paciente.nome}
-        protocolosAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo)}
+        pacienteNome={paciente.nome ?? ''}
+        protocolosAtivos={linhas.filter(l => l.status === 'ativo').map(l => l.protocolo_codigo).filter(Boolean)}
         protocoloSugerido={agendarAberto?.protocoloSugerido}
         profissionalId={demoProfissional.id}
         onAgendado={() => {
@@ -605,8 +636,8 @@ export default function PacientePage() {
         <TabsContent value="escalas" className="pt-4">
           <HistoricoEscalas
             pacienteId={id}
-            pacienteNome={paciente.nome}
-            protocolosAtivos={linhas.map(l => l.protocolo_codigo)}
+            pacienteNome={paciente.nome ?? ''}
+            protocolosAtivos={linhas.map(l => l.protocolo_codigo).filter(Boolean)}
             consultas={consultas}
             profissionalNome={demoProfissional.nome}
             empresaId={paciente.empresa_id}

@@ -37,7 +37,8 @@ export function AlertaItem({ alerta, onResolver, compact }: AlertaItemProps) {
             <p className="text-sm font-semibold text-[#111827] leading-tight">{alerta.titulo}</p>
             {alerta.paciente && (
               <p className="text-xs text-[#6B7280] mt-0.5">
-                {alerta.paciente.nome} · {alerta.paciente.matricula}
+                {alerta.paciente?.nome ?? '—'}
+                {alerta.paciente?.matricula ? ` · ${alerta.paciente.matricula}` : ''}
               </p>
             )}
             {!compact && alerta.descricao && (

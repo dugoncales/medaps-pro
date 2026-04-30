@@ -51,7 +51,8 @@ function ModalEnviarEscalaInner({
   onFechar, paciente, empresaId, escalaCodigo, escalaNome,
   tipo, premCodigo, protocoloCodigo, profissionalId,
 }: ModalEnviarEscalaProps) {
-  const mensagemPadrao = `Olá ${paciente.nome.split(' ')[0]}! Antes da nossa próxima consulta, por favor preencha esta escala (leva menos de 2 minutos). Obrigado!`
+  const primeiroNome = (paciente.nome ?? '').split(' ').filter(Boolean)[0] ?? ''
+  const mensagemPadrao = `Olá ${primeiroNome}! Antes da nossa próxima consulta, por favor preencha esta escala (leva menos de 2 minutos). Obrigado!`
 
   const [canal, setCanal] = useState<Canal>('link')
   const [destino, setDestino] = useState('')
