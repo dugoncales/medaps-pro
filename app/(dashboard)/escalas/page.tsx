@@ -1,300 +1,456 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { Search } from 'lucide-react'
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { IS_DEMO_MODE, demoConsultas } from '@/lib/demo-data'
-import { createClient } from '@/lib/supabase/client'
-import { useRuntimeStore } from '@/lib/store/runtime-store'
-import { ESCALAS, type EscalaCodigo } from '@/lib/escalas/ichom'
+import { Input } from '@/components/ui/input'
 import {
-  PREMS_DEFINICOES,
-  calcularNpsAgregado,
-  calcularMediasPorDimensao,
-  type PremCodigo,
-  type RegistroPREM,
-} from '@/lib/escalas/prems'
+  ESCALAS, ESCALAS_LIST,
+  type DefinicaoEscala, type EscalaCodigo,
+} from '@/lib/escalas/ichom'
+import { PROTOCOLO_MAP } from '@/lib/protocolos'
+import { createClient } from '@/lib/supabase/client'
+import { IS_DEMO_MODE } from '@/lib/demo-data'
 import { cn } from '@/lib/utils'
 
-interface RegistroPROM {
-  codigo: EscalaCodigo
-  score: number
-  classificacao: string
-  data: Date
+interface PromAplicadoRow {
+  id: string
+  codigo: string
+  score: number | null
+  data_aplicacao: string
+  paciente_id: string
 }
 
-function escalaToRegistro(codigo: EscalaCodigo, score: number, dataIso: string): RegistroPROM | null {
-  const def = ESCALAS[codigo]
-  if (!def) return null
-  return { codigo, score, classificacao: def.classificar(score, {}), data: new Date(dataIso) }
+interface EstatisticaEscala {
+  codigo: EscalaCodigo
+  nome: string
+  total: number
+  scoreMedio: number | null
+  ultimoUso: Date | null
 }
+
+const FILTRO_TODOS = '__TODOS__'
 
 export default function EscalasPage() {
-  const aplicacoes = useRuntimeStore(s => s.escalas)
-
-  // PROMs derivados de runtime store + consultas demo (sempre disponíveis)
-  const promsLocais = useMemo<RegistroPROM[]>(() => {
-    const out: RegistroPROM[] = []
-    for (const ap of aplicacoes) {
-      out.push({
-        codigo: ap.codigo,
-        score: ap.resultado.score,
-        classificacao: ap.resultado.classificacao,
-        data: new Date(ap.data),
-      })
-    }
-    if (IS_DEMO_MODE) {
-      for (const c of demoConsultas) {
-        for (const [k, v] of Object.entries(c.escalas ?? {})) {
-          if (typeof v !== 'number') continue
-          const codigo = k.toUpperCase() as EscalaCodigo
-          const reg = escalaToRegistro(codigo, v, c.data_consulta)
-          if (reg) out.push(reg)
-        }
-      }
-    }
-    return out
-  }, [aplicacoes])
-
-  const [promsServidor, setPromsServidor] = useState<RegistroPROM[]>([])
-  const [prems, setPrems] = useState<RegistroPREM[]>([])
+  const [filtroProtocolo, setFiltroProtocolo] = useState<string>(FILTRO_TODOS)
+  const [busca, setBusca] = useState('')
+  const [proms, setProms] = useState<PromAplicadoRow[]>([])
+  const [carregando, setCarregando] = useState<boolean>(() => !IS_DEMO_MODE)
 
   useEffect(() => {
     if (IS_DEMO_MODE) return
-    const supabase = createClient()
     let cancelado = false
+    const supabase = createClient()
 
-    async function fetchTudo() {
-      const [consRes, premsRes] = await Promise.all([
-        supabase.from('consultas').select('id, data_consulta, escalas').limit(500),
-        supabase.from('prems_aplicados').select('*').order('data_aplicacao', { ascending: false }).limit(500),
-      ])
-
-      if (cancelado) return
-
-      const cons = (consRes.data ?? []) as { id: string; data_consulta: string; escalas: Record<string, unknown> }[]
-      const out: RegistroPROM[] = []
-      for (const c of cons) {
-        for (const [k, v] of Object.entries(c.escalas ?? {})) {
-          if (typeof v !== 'number') continue
-          const codigo = k.toUpperCase() as EscalaCodigo
-          const reg = escalaToRegistro(codigo, v, c.data_consulta)
-          if (reg) out.push(reg)
-        }
+    async function fetchProms() {
+      try {
+        // RLS já restringe por empresa do profissional logado.
+        const { data, error } = await supabase
+          .from('proms_aplicados')
+          .select('id, codigo, score, data_aplicacao, paciente_id')
+          .order('data_aplicacao', { ascending: false })
+          .limit(2000)
+        if (error) throw error
+        if (!cancelado) setProms((data ?? []) as PromAplicadoRow[])
+      } catch (e) {
+        console.error('[escalas] fetch proms_aplicados:', e)
+      } finally {
+        if (!cancelado) setCarregando(false)
       }
-      setPromsServidor(out)
-      setPrems((premsRes.data ?? []) as RegistroPREM[])
     }
 
-    fetchTudo()
+    fetchProms()
     return () => { cancelado = true }
   }, [])
 
-  const proms = useMemo(() => [...promsLocais, ...promsServidor], [promsLocais, promsServidor])
+  // ─── Filtro biblioteca ────────────────────────────────────────────────────
+  const protocolosDisponiveis = useMemo<string[]>(() => {
+    const set = new Set<string>()
+    for (const e of ESCALAS_LIST) for (const p of e.protocolosRelacionados) set.add(p)
+    return Array.from(set).sort()
+  }, [])
+
+  const escalasFiltradas = useMemo<DefinicaoEscala[]>(() => {
+    const t = busca.trim().toLowerCase()
+    return ESCALAS_LIST.filter(e => {
+      if (filtroProtocolo !== FILTRO_TODOS && !e.protocolosRelacionados.includes(filtroProtocolo)) return false
+      if (!t) return true
+      return (
+        e.nome.toLowerCase().includes(t) ||
+        e.descricao.toLowerCase().includes(t) ||
+        e.codigo.toLowerCase().includes(t)
+      )
+    })
+  }, [filtroProtocolo, busca])
+
+  // ─── Estatísticas ─────────────────────────────────────────────────────────
+  const estatisticas = useMemo<EstatisticaEscala[]>(() => {
+    const map = new Map<EscalaCodigo, { total: number; soma: number; comScore: number; ultimo: Date | null }>()
+    for (const p of proms) {
+      const codigo = p.codigo as EscalaCodigo
+      if (!ESCALAS[codigo]) continue
+      const cur = map.get(codigo) ?? { total: 0, soma: 0, comScore: 0, ultimo: null }
+      cur.total += 1
+      if (p.score !== null && Number.isFinite(p.score)) {
+        cur.soma += Number(p.score)
+        cur.comScore += 1
+      }
+      const d = new Date(p.data_aplicacao)
+      if (!Number.isNaN(d.getTime()) && (!cur.ultimo || d > cur.ultimo)) cur.ultimo = d
+      map.set(codigo, cur)
+    }
+    return Array.from(map.entries())
+      .map(([codigo, v]) => ({
+        codigo,
+        nome: ESCALAS[codigo].nome,
+        total: v.total,
+        scoreMedio: v.comScore > 0 ? v.soma / v.comScore : null,
+        ultimoUso: v.ultimo,
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [proms])
+
+  const totalAplicacoes = proms.length
+  const escalaMaisUsada = estatisticas[0] ?? null
+  const pacientesUnicos = useMemo(
+    () => new Set(proms.map(p => p.paciente_id)).size,
+    [proms],
+  )
+  const semDados = !carregando && totalAplicacoes === 0
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 font-[Inter]">
       <div>
         <h1 className="text-xl font-bold text-[#111827]">Escalas Clínicas</h1>
-        <p className="text-sm text-[#6B7280] mt-0.5">
-          PROMs (resultados clínicos relatados) e PREMs (experiência do paciente).
+        <p className="mt-0.5 text-sm text-[#6B7280]">
+          Biblioteca ICHOM (PROMs e PREMs) e estatísticas de uso da empresa.
         </p>
       </div>
 
-      <Tabs defaultValue="proms" className="w-full">
+      <Tabs defaultValue="biblioteca" className="w-full">
         <TabsList className="bg-slate-100">
-          <TabsTrigger value="proms">📊 PROMs ({proms.length})</TabsTrigger>
-          <TabsTrigger value="prems">📣 PREMs ({prems.length})</TabsTrigger>
+          <TabsTrigger value="biblioteca">📚 Biblioteca · {ESCALAS_LIST.length}</TabsTrigger>
+          <TabsTrigger value="estatisticas">
+            📊 Estatísticas{!carregando && totalAplicacoes > 0 ? ` · ${totalAplicacoes}` : ''}
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="proms" className="mt-4">
-          <PROMsView registros={proms} />
+        <TabsContent value="biblioteca" className="mt-4 space-y-4">
+          {semDados && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[13px] text-blue-900 shadow-sm">
+              <span className="font-semibold">Nenhuma escala aplicada ainda.</span>{' '}
+              Aplique escalas nos perfis dos pacientes para começar a ver estatísticas de uso.
+            </div>
+          )}
+
+          <BibliotecaFiltros
+            busca={busca}
+            setBusca={setBusca}
+            filtroProtocolo={filtroProtocolo}
+            setFiltroProtocolo={setFiltroProtocolo}
+            protocolos={protocolosDisponiveis}
+            totalEscalas={ESCALAS_LIST.length}
+            totalFiltradas={escalasFiltradas.length}
+          />
+
+          {escalasFiltradas.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center shadow-sm">
+              <p className="text-sm text-slate-500">Nenhuma escala encontrada com esses filtros.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {escalasFiltradas.map(e => <CardEscala key={e.codigo} escala={e} />)}
+            </div>
+          )}
         </TabsContent>
 
-        <TabsContent value="prems" className="mt-4">
-          <PREMsView registros={prems} />
+        <TabsContent value="estatisticas" className="mt-4 space-y-4">
+          <EstatisticasView
+            carregando={carregando}
+            total={totalAplicacoes}
+            escalaMaisUsada={escalaMaisUsada}
+            pacientesUnicos={pacientesUnicos}
+            estatisticas={estatisticas}
+          />
         </TabsContent>
       </Tabs>
     </div>
   )
 }
 
-// ─── PROMs ───────────────────────────────────────────────────────────────────
+// ─── Biblioteca ─────────────────────────────────────────────────────────────
 
-function PROMsView({ registros }: { registros: RegistroPROM[] }) {
-  if (registros.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center">
-        <p className="text-sm text-slate-500">Nenhum PROM registrado ainda.</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Aplique uma escala em uma consulta ou envie remotamente para um paciente.
+interface BibliotecaFiltrosProps {
+  busca: string
+  setBusca: (v: string) => void
+  filtroProtocolo: string
+  setFiltroProtocolo: (v: string) => void
+  protocolos: string[]
+  totalEscalas: number
+  totalFiltradas: number
+}
+
+function BibliotecaFiltros({
+  busca, setBusca, filtroProtocolo, setFiltroProtocolo,
+  protocolos, totalEscalas, totalFiltradas,
+}: BibliotecaFiltrosProps) {
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            placeholder="Buscar por nome, código ou descrição…"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <p className="shrink-0 text-xs text-slate-500 num-tabular">
+          {totalFiltradas} de {totalEscalas} escalas
         </p>
       </div>
-    )
-  }
 
-  // Agrupar por código
-  const porCodigo = new Map<EscalaCodigo, RegistroPROM[]>()
-  for (const r of registros) {
-    const arr = porCodigo.get(r.codigo) ?? []
-    arr.push(r)
-    porCodigo.set(r.codigo, arr)
-  }
-
-  const cards = Array.from(porCodigo.entries()).map(([codigo, regs]) => {
-    const ord = regs.sort((a, b) => b.data.getTime() - a.data.getTime())
-    return { codigo, ultima: ord[0], total: regs.length }
-  })
-
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {cards.map(({ codigo, ultima, total }) => {
-        const def = ESCALAS[codigo]
-        return (
-          <div key={codigo} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{def.nome}</p>
-            <p className="mt-1 text-2xl font-bold text-blue-700">{ultima.score}<span className="text-xs text-slate-400"> / {def.scoreRange[1]}</span></p>
-            <p className="text-xs text-slate-600">{ultima.classificacao}</p>
-            <p className="mt-2 text-[11px] text-slate-400">
-              {total} aplicação{total > 1 ? 'ões' : ''} · última {ultima.data.toLocaleDateString('pt-BR')}
-            </p>
-          </div>
-        )
-      })}
+      <div className="flex flex-wrap gap-1.5">
+        <PillFiltro
+          ativo={filtroProtocolo === FILTRO_TODOS}
+          cor="#0F172A"
+          onClick={() => setFiltroProtocolo(FILTRO_TODOS)}
+        >
+          Todos protocolos
+        </PillFiltro>
+        {protocolos.map(cod => {
+          const proto = PROTOCOLO_MAP.get(cod)
+          return (
+            <PillFiltro
+              key={cod}
+              ativo={filtroProtocolo === cod}
+              cor={proto?.cor ?? '#6B7280'}
+              onClick={() => setFiltroProtocolo(cod)}
+              title={proto?.nome ?? cod}
+            >
+              <span aria-hidden>{proto?.icone}</span>
+              {cod}
+            </PillFiltro>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
-// ─── PREMs ───────────────────────────────────────────────────────────────────
+interface PillFiltroProps {
+  ativo: boolean
+  cor: string
+  onClick: () => void
+  children: React.ReactNode
+  title?: string
+}
 
-function PREMsView({ registros }: { registros: RegistroPREM[] }) {
-  const [filtroCodigo, setFiltroCodigo] = useState<PremCodigo>('GLOBAL')
-
-  const npsAgregado = useMemo(() => calcularNpsAgregado(registros), [registros])
-  const dimensoes = useMemo(
-    () => calcularMediasPorDimensao(registros, filtroCodigo),
-    [registros, filtroCodigo],
+function PillFiltro({ ativo, cor, onClick, children, title }: PillFiltroProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all',
+        ativo
+          ? 'border-transparent text-white shadow-sm'
+          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+      )}
+      style={ativo ? { backgroundColor: cor } : undefined}
+    >
+      {children}
+    </button>
   )
+}
 
-  if (registros.length === 0) {
+function CardEscala({ escala }: { escala: DefinicaoEscala }) {
+  return (
+    <div className="group flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+      <div className="mb-1.5 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900 truncate">{escala.nome}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{escala.codigo}</p>
+        </div>
+        <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 num-tabular">
+          {escala.scoreRange[0]}–{escala.scoreRange[1]}
+        </span>
+      </div>
+
+      <p className="mb-3 line-clamp-2 text-xs leading-snug text-slate-600">
+        {escala.descricao}
+      </p>
+
+      <div className="mt-auto flex flex-wrap gap-1">
+        {escala.protocolosRelacionados.map(cod => {
+          const proto = PROTOCOLO_MAP.get(cod)
+          return (
+            <span
+              key={cod}
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-white"
+              style={{ backgroundColor: proto?.cor ?? '#6B7280' }}
+              title={proto?.nome ?? cod}
+            >
+              <span aria-hidden>{proto?.icone}</span>
+              {cod}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Estatísticas ───────────────────────────────────────────────────────────
+
+interface EstatisticasViewProps {
+  carregando: boolean
+  total: number
+  escalaMaisUsada: EstatisticaEscala | null
+  pacientesUnicos: number
+  estatisticas: EstatisticaEscala[]
+}
+
+function EstatisticasView({
+  carregando, total, escalaMaisUsada, pacientesUnicos, estatisticas,
+}: EstatisticasViewProps) {
+  if (carregando) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-10 text-center">
-        <p className="text-sm text-slate-500">Nenhum PREM registrado ainda.</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Configure aplicações de PREM-Global ao final das consultas, ou envie remotamente.
+      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+        Carregando estatísticas…
+      </div>
+    )
+  }
+
+  if (total === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-200 bg-white p-12 text-center shadow-sm">
+        <p className="text-sm font-semibold text-slate-700">Nenhuma escala aplicada ainda</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Aplique escalas nos perfis dos pacientes para começar a ver estatísticas de uso.
         </p>
       </div>
     )
   }
 
-  // Tendência mensal NPS
-  const sparkline = npsAgregado.sparkline.map((v, i) => ({
-    mes: new Date(new Date().getFullYear(), new Date().getMonth() - (5 - i), 1)
-      .toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
-    nps: v,
+  const top5 = estatisticas.slice(0, 5).map(e => ({
+    nome: e.nome,
+    total: e.total,
   }))
 
   return (
-    <div className="space-y-4">
-      {/* NPS Card */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">NPS Atual</p>
-          <p className={cn(
-            'mt-2 text-5xl font-bold',
-            npsAgregado.atual >= 50 ? 'text-emerald-600' :
-            npsAgregado.atual >= 0 ? 'text-amber-600' : 'text-red-600',
-          )}>
-            {npsAgregado.atual}
-          </p>
-          {npsAgregado.delta !== null && (
-            <p className={cn(
-              'mt-1 text-xs font-semibold',
-              npsAgregado.delta > 0 ? 'text-emerald-600' :
-              npsAgregado.delta < 0 ? 'text-red-600' : 'text-slate-500',
-            )}>
-              {npsAgregado.delta > 0 ? '▲' : npsAgregado.delta < 0 ? '▼' : '='} {Math.abs(npsAgregado.delta)} vs. mês anterior
-            </p>
-          )}
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-            <div>
-              <p className="font-bold text-emerald-600">{npsAgregado.promotores}</p>
-              <p className="text-slate-500">Promotores</p>
-            </div>
-            <div>
-              <p className="font-bold text-amber-600">{npsAgregado.neutros}</p>
-              <p className="text-slate-500">Neutros</p>
-            </div>
-            <div>
-              <p className="font-bold text-red-600">{npsAgregado.detratores}</p>
-              <p className="text-slate-500">Detratores</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Tendência NPS — últimos 6 meses</p>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={sparkline} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-              <YAxis domain={[-100, 100]} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Line type="monotone" dataKey="nps" stroke="#2563eb" strokeWidth={2.5} dot />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+    <>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <Metric label="Total aplicações" value={String(total)} />
+        <Metric
+          label="Escala mais usada"
+          value={escalaMaisUsada?.nome ?? '—'}
+          sub={escalaMaisUsada ? `${escalaMaisUsada.total} aplicações` : undefined}
+        />
+        <Metric
+          label="Pacientes alcançados"
+          value={String(pacientesUnicos)}
+          sub="com ≥ 1 PROM aplicado"
+        />
+        <Metric
+          label="Diversidade"
+          value={`${estatisticas.length} / ${ESCALAS_LIST.length}`}
+          sub="escalas distintas em uso"
+        />
       </div>
 
-      {/* Filtro tipo PREM + médias por dimensão */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-slate-700">Médias por dimensão</p>
-          <div className="ml-auto flex gap-1">
-            {(Object.keys(PREMS_DEFINICOES) as PremCodigo[]).map(cod => (
-              <button
-                key={cod}
-                onClick={() => setFiltroCodigo(cod)}
-                className={cn(
-                  'rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
-                  filtroCodigo === cod
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-                )}
-              >
-                {PREMS_DEFINICOES[cod].nome}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {dimensoes.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
-            Sem respostas para essa dimensão ainda.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {dimensoes.map(d => (
-              <div key={d.pergunta_id} className="grid grid-cols-12 items-center gap-3">
-                <p className="col-span-7 text-xs text-slate-700 truncate">{d.texto}</p>
-                <div className="col-span-3 h-2 rounded-full bg-slate-100 overflow-hidden">
-                  <div
-                    className={cn(
-                      'h-full',
-                      d.media >= 4.2 ? 'bg-emerald-500' : d.media >= 3.5 ? 'bg-amber-500' : 'bg-red-500',
-                    )}
-                    style={{ width: `${(d.media / 5) * 100}%` }}
-                  />
-                </div>
-                <p className="col-span-1 text-right text-xs font-bold text-slate-700 num-tabular">{d.media.toFixed(1)}</p>
-                <p className="col-span-1 text-right text-[10px] text-slate-400 num-tabular">n={d.total_respostas}</p>
-              </div>
-            ))}
-          </div>
-        )}
+        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+          Top 5 escalas mais aplicadas
+        </p>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={top5} margin={{ top: 12, right: 8, left: -12, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis dataKey="nome" tick={{ fontSize: 11 }} interval={0} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+            <Tooltip
+              contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+              formatter={(v) => [v as number, 'aplicações']}
+            />
+            <Bar dataKey="total" radius={[6, 6, 0, 0]}>
+              {top5.map((_, i) => (
+                <Cell key={i} fill={['#1E40AF', '#2563EB', '#3B82F6', '#60A5FA', '#93C5FD'][i] ?? '#3B82F6'} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+          Ranking de escalas
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="border-b border-slate-200 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="pb-2 pr-3">Escala</th>
+                <th className="pb-2 px-3 text-right">Aplicações</th>
+                <th className="pb-2 px-3 text-right">Score médio</th>
+                <th className="pb-2 pl-3 text-right">Último uso</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estatisticas.map(e => {
+                const def = ESCALAS[e.codigo]
+                return (
+                  <tr key={e.codigo} className="border-b border-slate-100 last:border-0">
+                    <td className="py-3 pr-3 align-top">
+                      <p className="text-sm font-semibold text-slate-900">{e.nome}</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {def.protocolosRelacionados.map(cod => {
+                          const proto = PROTOCOLO_MAP.get(cod)
+                          return (
+                            <span
+                              key={cod}
+                              className="rounded px-1 py-0.5 text-[9px] font-bold text-white"
+                              style={{ backgroundColor: proto?.cor ?? '#6B7280' }}
+                              title={proto?.nome ?? cod}
+                            >
+                              {cod}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-right text-sm font-semibold text-slate-900 num-tabular">
+                      {e.total}
+                    </td>
+                    <td className="py-3 px-3 text-right text-sm text-slate-700 num-tabular">
+                      {e.scoreMedio != null
+                        ? `${e.scoreMedio.toFixed(1)} / ${def.scoreRange[1]}`
+                        : '—'}
+                    </td>
+                    <td className="py-3 pl-3 text-right text-xs text-slate-500 num-tabular">
+                      {e.ultimoUso ? e.ultimoUso.toLocaleDateString('pt-BR') : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-2xl font-bold text-slate-900">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-slate-500">{sub}</p>}
     </div>
   )
 }

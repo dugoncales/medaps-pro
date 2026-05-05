@@ -25,7 +25,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/pacientes': 'Pacientes',
   '/jornadas':  'Jornadas',
   '/alertas':   'Alertas',
-  '/escalas':   'PROMs e PREMs',
+  '/escalas':   'Escalas',
   '/envios':    'Envios',
   '/protocolos':'Linha de Cuidado',
   '/relatorio': 'Relatório Empresa',
