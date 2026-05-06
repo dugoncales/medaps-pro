@@ -84,9 +84,20 @@ export function useNotificacoes(pollingMs = 5 * 60 * 1000): UseNotificacoesRetur
             const ultimaConsulta = demoConsultas
               .filter(c => c.paciente_id === pac_id)
               .sort((a, b) => new Date(b.data_consulta).getTime() - new Date(a.data_consulta).getTime())[0]
-            const dias_sem_retorno = ultimaConsulta
-              ? Math.floor((Date.now() - new Date(ultimaConsulta.data_consulta).getTime()) / 86400000)
-              : 999
+            // Sem consulta registrada: usamos a linha mais antiga ativa como
+            // âncora ("dias desde a inscrição"); fallback 0 para evitar o
+            // placeholder mágico que aparecia como "999 dias sem consulta".
+            const linhasDoPac = demoLinhas.filter(l => l.paciente_id === pac_id && l.status === 'ativo')
+            const ancoraLinha = linhasDoPac
+              .map(l => new Date(l.created_at).getTime())
+              .filter(t => Number.isFinite(t))
+              .sort((a, b) => a - b)[0]
+            const referencia = ultimaConsulta
+              ? new Date(ultimaConsulta.data_consulta).getTime()
+              : ancoraLinha ?? null
+            const dias_sem_retorno = referencia !== null
+              ? Math.floor((Date.now() - referencia) / 86400000)
+              : 0
             const metricasFlat = demoEvolucoes
               .filter(e => e.paciente_id === pac_id)
               .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())

@@ -1,11 +1,63 @@
 import Link from 'next/link'
 import {
+  IS_DEMO_MODE,
   demoPacientes, demoLinhas, demoEvolucoes, demoConsultas, demoExames,
 } from '@/lib/demo-data'
+import { createClient } from '@/lib/supabase/server'
 import { calcularJornada, type StatusJornada } from '@/lib/jornada/motor'
 import { gerarProximasAcoes, urgenciaBadge, prazoBadge, contatoIcon, type PacienteComJornadas } from '@/lib/jornada/proximas-acoes'
 import { PROTOCOLO_MAP } from '@/lib/protocolos'
 import { cn } from '@/lib/utils'
+import type {
+  Paciente, LinhaCuidado, Consulta, EvolucaoClinica, ExameResultado,
+} from '@/types'
+
+// ─── Dados ───────────────────────────────────────────────────────────────────
+//
+// Em demo mode usa as fixtures locais; em modo real puxa do Supabase via RLS
+// (já filtra por empresa_id). Esses arrays alimentam o motor de jornadas.
+
+interface DadosJornada {
+  pacientes: Paciente[]
+  linhas: LinhaCuidado[]
+  consultas: Consulta[]
+  evolucoes: EvolucaoClinica[]
+  exames: ExameResultado[]
+}
+
+async function carregarDados(): Promise<DadosJornada> {
+  if (IS_DEMO_MODE) {
+    return {
+      pacientes: demoPacientes,
+      linhas: demoLinhas,
+      consultas: demoConsultas,
+      evolucoes: demoEvolucoes,
+      exames: demoExames,
+    }
+  }
+
+  try {
+    const supabase = await createClient()
+    const [pacRes, linhasRes, consRes, evolRes, examesRes] = await Promise.all([
+      supabase.from('pacientes').select('*').eq('ativo', true),
+      supabase.from('linhas_cuidado').select('*').eq('status', 'ativo'),
+      supabase.from('consultas').select('*').order('data_consulta', { ascending: false }).limit(2000),
+      supabase.from('evolucoes_clinicas').select('*').order('created_at', { ascending: false }).limit(2000),
+      supabase.from('exames_resultados').select('*').order('data_coleta', { ascending: false }).limit(2000),
+    ])
+
+    return {
+      pacientes: (pacRes.data ?? []) as Paciente[],
+      linhas: (linhasRes.data ?? []) as LinhaCuidado[],
+      consultas: (consRes.data ?? []) as Consulta[],
+      evolucoes: (evolRes.data ?? []) as EvolucaoClinica[],
+      exames: (examesRes.data ?? []) as ExameResultado[],
+    }
+  } catch (err) {
+    console.error('[Jornadas] carregarDados Supabase falhou', err)
+    return { pacientes: [], linhas: [], consultas: [], evolucoes: [], exames: [] }
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,28 +67,30 @@ function estimarPasso(nivel?: string): number {
   return 2
 }
 
-async function buildJornadas(): Promise<{ paciente_id: string; protocolo: string; jornada: StatusJornada }[]> {
+async function buildJornadas(
+  dados: DadosJornada,
+): Promise<{ paciente_id: string; protocolo: string; jornada: StatusJornada }[]> {
   try {
-    const ativas = (demoLinhas ?? []).filter(l => l?.status === 'ativo')
+    const ativas = (dados.linhas ?? []).filter(l => l?.status === 'ativo')
     if (ativas.length === 0) return []
 
     const resultados = await Promise.all(
       ativas.map(async (linha) => {
         try {
-          const evolucoes = (demoEvolucoes ?? [])
+          const evolucoes = (dados.evolucoes ?? [])
             .filter(e => e.paciente_id === linha.paciente_id && e.protocolo_codigo === linha.protocolo_codigo)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
           const ultimaEvolucao = evolucoes[0]
 
-          const historico = (demoConsultas ?? [])
+          const historico = (dados.consultas ?? [])
             .filter(c => c.paciente_id === linha.paciente_id)
             .map(c => {
-              const ev = (demoEvolucoes ?? []).find(e => e.consulta_id === c.id && e.protocolo_codigo === linha.protocolo_codigo)
+              const ev = (dados.evolucoes ?? []).find(e => e.consulta_id === c.id && e.protocolo_codigo === linha.protocolo_codigo)
               return { ...c, passo_protocolo: ev?.passo_protocolo, metricas: ev?.metricas ?? {} }
             })
 
-          const exames = (demoExames ?? []).filter(e => e.paciente_id === linha.paciente_id)
+          const exames = (dados.exames ?? []).filter(e => e.paciente_id === linha.paciente_id)
 
           const metricas = {
             ...((ultimaEvolucao?.metricas ?? {}) as Record<string, any>),
@@ -77,10 +131,15 @@ function buildFunil(todas: { paciente_id: string; protocolo: string; jornada: St
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function JornadasPage() {
-  const todas = await buildJornadas()
+  const dados = await carregarDados()
+  const todas = await buildJornadas(dados)
 
   // Build pacientes data for gerarProximasAcoes
-  const pacientesMap = new Map(demoPacientes.map(p => [p.id, p]))
+  const pacientesMap = new Map(dados.pacientes.map(p => [p.id, p]))
+  const linhaByPacProto = new Map<string, LinhaCuidado>()
+  for (const l of dados.linhas) {
+    linhaByPacProto.set(`${l.paciente_id}::${l.protocolo_codigo}`, l)
+  }
 
   const porPaciente = new Map<string, StatusJornada[]>()
   for (const { paciente_id, jornada } of todas) {
@@ -88,17 +147,36 @@ export default async function JornadasPage() {
     porPaciente.get(paciente_id)!.push(jornada)
   }
 
+  const agora = Date.now()
   const pacientesComJornadas: PacienteComJornadas[] = []
   for (const [pac_id, jornadas] of porPaciente) {
     const pac = pacientesMap.get(pac_id)
     if (!pac) continue
-    const ultimaConsulta = demoConsultas
+    const ultimaConsulta = dados.consultas
       .filter(c => c.paciente_id === pac_id)
       .sort((a, b) => new Date(b.data_consulta).getTime() - new Date(a.data_consulta).getTime())[0]
-    const dias_sem_retorno = ultimaConsulta
-      ? Math.floor((Date.now() - new Date(ultimaConsulta.data_consulta).getTime()) / 86400000)
-      : 999
-    const metricasFlat = demoEvolucoes
+
+    // Quando o paciente nunca consultou, usamos a data de inscrição da linha
+    // mais antiga como referência — assim o número reflete "dias na linha
+    // sem consulta", em vez do antigo placeholder mágico de 999.
+    let dias_sem_retorno: number
+    if (ultimaConsulta) {
+      dias_sem_retorno = Math.floor(
+        (agora - new Date(ultimaConsulta.data_consulta).getTime()) / 86400000,
+      )
+    } else {
+      const linhasDoPac = jornadas
+        .map(j => linhaByPacProto.get(`${pac_id}::${j.protocolo}`))
+        .filter((l): l is LinhaCuidado => Boolean(l))
+      const maisAntiga = linhasDoPac
+        .map(l => new Date(l.created_at).getTime())
+        .filter(t => Number.isFinite(t))
+        .sort((a, b) => a - b)[0]
+      dias_sem_retorno = maisAntiga
+        ? Math.floor((agora - maisAntiga) / 86400000)
+        : 0
+    }
+    const metricasFlat = dados.evolucoes
       .filter(e => e.paciente_id === pac_id)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       .reduce((acc, e) => ({ ...acc, ...(e.metricas as Record<string, any>) }), {} as Record<string, any>)

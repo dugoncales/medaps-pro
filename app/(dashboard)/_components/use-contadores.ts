@@ -33,7 +33,7 @@ function contadoresDemo(extraPacientes = 0, extraLinhas = 0): Contadores {
   return {
     pacientes: demoPacientes.length + extraPacientes,
     alertas: demoAlertas.filter(a => !a.resolvido).length,
-    jornadasUrgentes: ativosLinhas.filter(l => l.nivel_gravidade === 'descontrolado').length,
+    jornadasUrgentes: ativosLinhas.filter(l => l.nivel_gravidade === 'descontrolado' || l.nivel_gravidade === 'parcial').length,
     consultasHoje: demoConsultas.filter(c => c.data_consulta.slice(0, 10) === hoje).length,
     alertasUrgentes: demoAlertas.filter(a => !a.resolvido && (a.prioridade === 'critica' || a.prioridade === 'alta')).length,
     linhasAtivas: total,
@@ -84,7 +84,7 @@ export function useContadores(): Contadores {
         supabase.from('pacientes').select('*', { count: 'exact', head: true }).eq('ativo', true),
         supabase.from('alertas').select('*', { count: 'exact', head: true }).eq('resolvido', false),
         supabase.from('linhas_cuidado').select('*', { count: 'exact', head: true })
-          .eq('status', 'ativo').eq('nivel_gravidade', 'descontrolado'),
+          .eq('status', 'ativo').in('nivel_gravidade', ['descontrolado', 'parcial']),
         supabase.from('consultas').select('*', { count: 'exact', head: true })
           .gte('data_consulta', hojeIni.toISOString())
           .lte('data_consulta', hojeFim.toISOString()),
