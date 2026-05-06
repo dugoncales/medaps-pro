@@ -21,6 +21,7 @@ export interface Contadores {
   linhasAtivas: number
   linhasControladas: number
   controladosPct: number
+  carregando: boolean
 }
 
 function contadoresDemo(extraPacientes = 0, extraLinhas = 0): Contadores {
@@ -38,6 +39,7 @@ function contadoresDemo(extraPacientes = 0, extraLinhas = 0): Contadores {
     linhasAtivas: total,
     linhasControladas: controladas,
     controladosPct: pct,
+    carregando: false,
   }
 }
 
@@ -48,7 +50,10 @@ function contadoresDemo(extraPacientes = 0, extraLinhas = 0): Contadores {
 export function useContadores(): Contadores {
   const pacientesRuntime = useRuntimeStore(s => s.pacientes)
   const linhasRuntime = useRuntimeStore(s => s.linhas)
-  const [cReal, setCReal] = useState<Contadores>(() => contadoresDemo(0, 0))
+  const [cReal, setCReal] = useState<Contadores>(() => ({
+    ...contadoresDemo(0, 0),
+    carregando: !IS_DEMO_MODE,
+  }))
 
   const cDemo = useMemo(
     () => contadoresDemo(pacientesRuntime.length, linhasRuntime.length),
@@ -103,6 +108,7 @@ export function useContadores(): Contadores {
         linhasAtivas,
         linhasControladas: linhasCtr,
         controladosPct: linhasAtivas ? Math.round((linhasCtr / linhasAtivas) * 100) : 0,
+        carregando: false,
       })
     }
 

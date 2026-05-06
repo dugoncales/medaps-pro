@@ -8,6 +8,7 @@ interface MetricCardProps {
   tendencia?: 'up' | 'down' | 'neutral'
   cor?: 'default' | 'green' | 'amber' | 'red' | 'blue'
   icone?: React.ReactNode
+  carregando?: boolean
 }
 
 const VALUE_COLOR: Record<NonNullable<MetricCardProps['cor']>, string> = {
@@ -24,7 +25,7 @@ const TREND_COLOR: Record<NonNullable<MetricCardProps['tendencia']>, string> = {
   neutral: 'text-[#6B7280]',
 }
 
-export function MetricCard({ label, value, subtexto, tendencia, cor = 'default', icone }: MetricCardProps) {
+export function MetricCard({ label, value, subtexto, tendencia, cor = 'default', icone, carregando }: MetricCardProps) {
   const TrendIcon =
     tendencia === 'up' ? ArrowUpRight :
     tendencia === 'down' ? ArrowDownRight :
@@ -40,14 +41,24 @@ export function MetricCard({ label, value, subtexto, tendencia, cor = 'default',
         {icone && <span className="text-[#9CA3AF] text-base leading-none">{icone}</span>}
       </div>
 
-      <p className={cn(
-        'mt-3 text-[32px] font-bold leading-[1.1] tracking-tight num-tabular',
-        VALUE_COLOR[cor],
-      )}>
-        {value}
-      </p>
+      {carregando ? (
+        <div
+          className="mt-3 h-9 w-24 rounded-md bg-slate-100 animate-pulse"
+          aria-label="Carregando"
+          role="status"
+        />
+      ) : (
+        <p className={cn(
+          'mt-3 text-[32px] font-bold leading-[1.1] tracking-tight num-tabular',
+          VALUE_COLOR[cor],
+        )}>
+          {value}
+        </p>
+      )}
 
-      {subtexto && (
+      {carregando ? (
+        <div className="mt-2 h-3 w-32 rounded bg-slate-100 animate-pulse" />
+      ) : subtexto && (
         <div className={cn(
           'mt-2 flex items-center gap-1 text-xs font-medium',
           tendencia ? TREND_COLOR[tendencia] : 'text-[#6B7280]',

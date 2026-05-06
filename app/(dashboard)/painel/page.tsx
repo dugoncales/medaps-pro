@@ -144,34 +144,40 @@ export default function DashboardPage() {
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Total de Pacientes"
+          label="Pacientes Ativos"
           value={contadores?.pacientes ?? 0}
-          subtexto="em linha de cuidado ativa"
+          subtexto="cadastrados na empresa"
           cor="blue"
           icone={<span>👥</span>}
+          carregando={contadores?.carregando}
         />
         <MetricCard
-          label="Consultas Hoje"
-          value={contadores?.consultasHoje || (agendamentos?.length ?? 0)}
-          subtexto="agendadas para hoje"
+          label="Jornadas em Andamento"
+          value={contadores?.linhasAtivas ?? 0}
+          subtexto="linhas de cuidado ativas"
           cor="default"
-          icone={<span>📋</span>}
+          icone={<span>🗺️</span>}
+          carregando={contadores?.carregando}
         />
         <MetricCard
-          label="Em Atraso"
-          value={contadores?.alertasUrgentes ?? 0}
-          subtexto="alertas urgentes/críticos"
+          label="Alertas Ativos"
+          value={contadores?.alertas ?? 0}
+          subtexto={
+            (contadores?.alertasUrgentes ?? 0) > 0
+              ? `${contadores.alertasUrgentes} urgente${contadores.alertasUrgentes > 1 ? 's' : ''}`
+              : 'sem urgências'
+          }
           cor="amber"
-          tendencia="down"
-          icone={<span>⚠️</span>}
+          icone={<span>🔔</span>}
+          carregando={contadores?.carregando}
         />
         <MetricCard
-          label="Controlados"
+          label="Taxa de Controle"
           value={`${contadores?.controladosPct ?? 0}%`}
-          subtexto={`${contadores?.linhasControladas ?? 0} de ${contadores?.linhasAtivas ?? 0} linhas`}
+          subtexto={`${contadores?.linhasControladas ?? 0} de ${contadores?.linhasAtivas ?? 0} linhas controladas`}
           cor="green"
-          tendencia="up"
           icone={<span>✅</span>}
+          carregando={contadores?.carregando}
         />
       </div>
 
