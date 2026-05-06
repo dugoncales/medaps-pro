@@ -13,6 +13,7 @@ import {
   Activity,
   ClipboardList,
   Send,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -29,6 +30,8 @@ interface NavItem {
 
 interface SidebarProps {
   profissionalNome: string
+  drawerAberto?: boolean
+  onClose?: () => void
 }
 
 const SECOES: { titulo: string; itens: NavItem[] }[] = [
@@ -62,7 +65,7 @@ const SECOES: { titulo: string; itens: NavItem[] }[] = [
   },
 ]
 
-export function Sidebar({ profissionalNome }: SidebarProps) {
+export function Sidebar({ profissionalNome, drawerAberto = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const contadores = useContadores()
@@ -85,20 +88,46 @@ export function Sidebar({ profissionalNome }: SidebarProps) {
     .split(' ').slice(0, 2).map(n => n[0]).join('').toUpperCase()
 
   return (
-    <aside
-      className="flex w-[240px] flex-col text-slate-100 shrink-0 shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)]"
-      style={{ background: 'linear-gradient(180deg, #0A2540 0%, #1E3A5F 100%)' }}
-    >
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 border-b border-white/[0.06] px-5 py-[18px]">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1E40AF] shadow-[0_0_0_1px_rgba(59,130,246,0.3)]">
-          <Activity className="h-5 w-5 text-white" strokeWidth={2.25} />
+    <>
+      {/* Overlay (mobile somente) — clica para fechar */}
+      <div
+        className={cn(
+          'md:hidden fixed inset-0 z-40 bg-black/50 transition-opacity duration-200',
+          drawerAberto ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+        aria-hidden="true"
+        onClick={onClose}
+      />
+      <aside
+        className={cn(
+          'flex flex-col text-slate-100 shadow-[inset_-1px_0_0_rgba(255,255,255,0.03)]',
+          // Mobile: drawer fixo, transladado para fora quando fechado
+          'fixed inset-y-0 left-0 z-50 w-[260px] transition-transform duration-200 ease-out',
+          drawerAberto ? 'translate-x-0' : '-translate-x-full',
+          // Desktop: estático, sempre visível
+          'md:relative md:z-auto md:w-[240px] md:translate-x-0 md:shrink-0 md:transition-none',
+        )}
+        style={{ background: 'linear-gradient(180deg, #0A2540 0%, #1E3A5F 100%)' }}
+        aria-label="Navegação principal"
+      >
+        {/* Logo + close (mobile) */}
+        <div className="flex items-center gap-2.5 border-b border-white/[0.06] px-5 py-[18px]">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1E40AF] shadow-[0_0_0_1px_rgba(59,130,246,0.3)]">
+            <Activity className="h-5 w-5 text-white" strokeWidth={2.25} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold tracking-tight text-white">MedAPS Pro</p>
+            <p className="text-[11px] text-slate-400 truncate">APS Empresarial</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="md:hidden rounded-md p-1.5 text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+            aria-label="Fechar menu"
+          >
+            <X className="h-5 w-5" strokeWidth={2} />
+          </button>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold tracking-tight text-white">MedAPS Pro</p>
-          <p className="text-[11px] text-slate-400 truncate">APS Empresarial</p>
-        </div>
-      </div>
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-4">
@@ -116,6 +145,7 @@ export function Sidebar({ profissionalNome }: SidebarProps) {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      onClick={onClose}
                       className={cn(
                         'group relative flex items-center gap-3 px-5 py-2 text-[13px] font-medium transition-colors',
                         'border-l-[3px]',
@@ -172,5 +202,6 @@ export function Sidebar({ profissionalNome }: SidebarProps) {
         </div>
       </div>
     </aside>
+    </>
   )
 }

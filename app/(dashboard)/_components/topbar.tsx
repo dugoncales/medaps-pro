@@ -10,6 +10,7 @@ import {
   ChevronDown,
   CheckCircle2,
   Map,
+  Menu,
   LogOut,
   User as UserIcon,
 } from 'lucide-react'
@@ -62,9 +63,10 @@ function buildBreadcrumbs(pathname: string): Crumb[] {
 interface TopbarProps {
   profissionalNome: string
   totalAlertas: number
+  onMenuClick?: () => void
 }
 
-export function Topbar({ profissionalNome, totalAlertas }: TopbarProps) {
+export function Topbar({ profissionalNome, totalAlertas, onMenuClick }: TopbarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [painelAberto, setPainelAberto] = useState(false)
@@ -115,25 +117,45 @@ export function Topbar({ profissionalNome, totalAlertas }: TopbarProps) {
 
   const listaExibida = notificacoes.filter(n => !n.lida).slice(0, 8)
 
+  // Apenas a última breadcrumb (página atual) — usada como título compacto no mobile
+  const tituloAtual = crumbs[crumbs.length - 1]?.label ?? ''
+
   return (
-    <header className="flex h-16 items-center justify-between border-b border-line bg-surface px-6 shrink-0 relative z-20">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-[13px] min-w-0" aria-label="Breadcrumb">
-        {crumbs.map((c, i) => (
-          <span key={i} className="flex items-center gap-1.5 min-w-0">
-            {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-ink-soft shrink-0" />}
-            {c.href ? (
-              <Link href={c.href} className="text-ink-muted hover:text-ink transition-colors truncate">
-                {c.label}
-              </Link>
-            ) : (
-              <span className={cn('truncate', i === crumbs.length - 1 ? 'font-semibold text-ink' : 'text-ink-muted')}>
-                {c.label}
-              </span>
-            )}
-          </span>
-        ))}
-      </nav>
+    <header className="flex h-16 items-center justify-between border-b border-line bg-surface px-3 md:px-6 shrink-0 relative z-20 gap-2">
+      {/* Esquerda: hamburguer (mobile) + breadcrumb (desktop) ou título (mobile) */}
+      <div className="flex items-center gap-2 min-w-0">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="md:hidden rounded-lg p-2 text-ink-muted hover:bg-surface-subtle hover:text-ink transition-colors -ml-1"
+          aria-label="Abrir menu"
+        >
+          <Menu className="h-[20px] w-[20px]" strokeWidth={2} />
+        </button>
+
+        {/* Breadcrumb completo — desktop */}
+        <nav className="hidden md:flex items-center gap-1.5 text-[13px] min-w-0" aria-label="Breadcrumb">
+          {crumbs.map((c, i) => (
+            <span key={i} className="flex items-center gap-1.5 min-w-0">
+              {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-ink-soft shrink-0" />}
+              {c.href ? (
+                <Link href={c.href} className="text-ink-muted hover:text-ink transition-colors truncate">
+                  {c.label}
+                </Link>
+              ) : (
+                <span className={cn('truncate', i === crumbs.length - 1 ? 'font-semibold text-ink' : 'text-ink-muted')}>
+                  {c.label}
+                </span>
+              )}
+            </span>
+          ))}
+        </nav>
+
+        {/* Título compacto — mobile (substitui o breadcrumb) */}
+        <p className="md:hidden truncate text-[14px] font-semibold text-ink min-w-0">
+          {tituloAtual}
+        </p>
+      </div>
 
       {/* Search */}
       <div className="hidden md:flex flex-1 max-w-md mx-8">
@@ -175,7 +197,7 @@ export function Topbar({ profissionalNome, totalAlertas }: TopbarProps) {
           </button>
 
           {painelAberto && (
-            <div className="absolute right-0 top-full mt-2 w-[400px] overflow-hidden rounded-xl border border-line bg-surface shadow-[0_10px_25px_-5px_rgba(0,0,0,0.08),0_8px_10px_-6px_rgba(0,0,0,0.04)]">
+            <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] max-w-[400px] overflow-hidden rounded-xl border border-line bg-surface shadow-[0_10px_25px_-5px_rgba(0,0,0,0.08),0_8px_10px_-6px_rgba(0,0,0,0.04)]">
               <div className="flex items-center justify-between border-b border-line/70 px-4 py-3">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-semibold text-ink">Notificações</span>

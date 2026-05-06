@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation'
 import { IS_DEMO_MODE, demoProfissional, demoAlertas } from '@/lib/demo-data'
 import { createClient } from '@/lib/supabase/server'
-import { Sidebar } from './_components/sidebar'
-import { Topbar } from './_components/topbar'
+import { DashboardShell } from './_components/dashboard-shell'
 import { AlertaToastListener } from './_components/alerta-toast-listener'
 import { Toaster } from '@/components/shared/Toaster'
 
@@ -32,16 +31,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
-      <Sidebar profissionalNome={profissionalNome} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profissionalNome={profissionalNome} totalAlertas={totalAlertas} />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
-      </div>
+    <>
+      <DashboardShell profissionalNome={profissionalNome} totalAlertas={totalAlertas}>
+        {children}
+      </DashboardShell>
       <AlertaToastListener />
       <Toaster />
-    </div>
+    </>
   )
 }
