@@ -739,6 +739,7 @@ export default function ConsultaPage() {
   // (via botão "Salvar PROMs" ou via finalizarConsulta).
   const [promsJaSalvos, setPromsJaSalvos] = useState<Set<EscalaCodigo>>(new Set())
   const [salvandoProms, setSalvandoProms] = useState(false)
+  const [gerandoIA, setGerandoIA] = useState(false)
   const pushToast = useToastStore((s) => s.push)
 
   const imc = calcIMC(vitais.peso, vitais.altura)
@@ -760,6 +761,90 @@ export default function ConsultaPage() {
 
   // Quantas ainda não foram persistidas em proms_aplicados
   const escalasPendentes = escalasCompletas.filter((cod) => !promsJaSalvos.has(cod))
+
+  async function gerarSugestaoPlano() {
+    if (!paciente) return
+    setGerandoIA(true)
+    try {
+      const proms: Record<string, number> = {}
+      for (const cod of escalasCompletas) {
+        const respostas = escalasRespostas[cod]
+        if (!respostas) continue
+        const r = calcularResultado(cod, respostas)
+        proms[cod] = r.score
+      }
+
+      const sinaisVitais: Record<string, number | undefined> = {
+        pa_sistolica: vitais.pa1_s ? Number(vitais.pa1_s) : undefined,
+        pa_diastolica: vitais.pa1_d ? Number(vitais.pa1_d) : undefined,
+        fc: vitais.fc ? Number(vitais.fc) : undefined,
+        spo2: vitais.spo2 ? Number(vitais.spo2) : undefined,
+        peso: vitais.peso ? Number(vitais.peso) : undefined,
+        imc: imc ? Number(imc) : undefined,
+        temperatura: vitais.temp ? Number(vitais.temp) : undefined,
+      }
+      for (const k of Object.keys(sinaisVitais)) {
+        if (sinaisVitais[k] === undefined || Number.isNaN(sinaisVitais[k])) {
+          delete sinaisVitais[k]
+        }
+      }
+
+      const res = await fetch('/api/ia-clinica', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paciente: {
+            nome: paciente.nome,
+            idade: calcularIdade(paciente.data_nascimento),
+            sexo: paciente.sexo,
+            setor: paciente.setor,
+            comorbidades: paciente.comorbidades,
+            medicamentos_uso: paciente.medicamentos_uso,
+            tabagismo_status: paciente.tabagismo_status,
+          },
+          protocolos: linhasAtivas.map(l => ({
+            codigo: l.protocolo_codigo,
+            nome: PROTOCOLO_MAP.get(l.protocolo_codigo)?.nome,
+            nivel_gravidade: l.nivel_gravidade,
+          })),
+          proms,
+          sinaisVitais,
+          queixa: soap.s || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        pushToast({
+          tipo: 'critico',
+          titulo: 'IA indisponível',
+          descricao: data?.error ?? `Erro HTTP ${res.status}`,
+        })
+        return
+      }
+      const md = (data?.markdown as string | undefined) ?? ''
+      if (!md) {
+        pushToast({ tipo: 'critico', titulo: 'IA retornou vazio' })
+        return
+      }
+      // Extrai apenas a seção "Conduta Sugerida" para o campo P. Se faltar, usa
+      // a resposta inteira como fallback.
+      const condutaMatch = md.match(/##\s*Conduta\s+Sugerida\s*\n([\s\S]*?)(?=\n##\s|\n*$)/i)
+      const trecho = condutaMatch ? condutaMatch[1].trim() : md.trim()
+      setSoap(s => ({
+        ...s,
+        p: s.p.trim() ? `${s.p}\n\n— Sugestão IA —\n${trecho}` : trecho,
+      }))
+      pushToast({ tipo: 'sucesso', titulo: 'Sugestão IA inserida no plano' })
+    } catch (err) {
+      pushToast({
+        tipo: 'critico',
+        titulo: 'Falha ao gerar sugestão',
+        descricao: err instanceof Error ? err.message : 'Erro desconhecido',
+      })
+    } finally {
+      setGerandoIA(false)
+    }
+  }
 
   /**
    * Insere em proms_aplicados as escalas listadas. Falha por linha não
@@ -1437,12 +1522,32 @@ export default function ConsultaPage() {
                 { key: 'p' as const, label: 'P — Plano', placeholder: 'Condutas, prescrições, encaminhamentos, orientações…' },
               ].map(({ key, label, placeholder }) => (
                 <div key={key}>
-                  <Label className="font-semibold text-slate-700">{label}</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="font-semibold text-slate-700">{label}</Label>
+                    {key === 'p' && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={gerarSugestaoPlano}
+                        disabled={gerandoIA}
+                        className="h-7 text-xs gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
+                      >
+                        {gerandoIA ? (
+                          <>
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-purple-300 border-t-purple-600" />
+                            Gerando…
+                          </>
+                        ) : (
+                          <>💡 Sugestão IA</>
+                        )}
+                      </Button>
+                    )}
+                  </div>
                   <Textarea
                     value={soap[key]}
                     onChange={e => setSoap(s => ({ ...s, [key]: e.target.value }))}
                     placeholder={placeholder}
-                    rows={3}
+                    rows={key === 'p' ? 5 : 3}
                     className="mt-1"
                   />
                 </div>

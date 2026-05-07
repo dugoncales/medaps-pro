@@ -15,6 +15,7 @@ import { HistoricoEscalas } from '@/components/consulta/HistoricoEscalas'
 import { EditarPacienteModal } from '@/components/paciente/EditarPacienteModal'
 import { AdicionarLinhaModal } from '@/components/paciente/AdicionarLinhaModal'
 import { AgendarConsultaModal } from '@/components/paciente/AgendarConsultaModal'
+import { IAClinicalPanel } from '@/components/ia/IAClinicalPanel'
 import { formatMatricula } from '@/lib/format'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { AlertaItem } from '@/components/shared/AlertaItem'
@@ -477,6 +478,37 @@ export default function PacientePage() {
         onAgendado={() => {
           // Em modo real o realtime channel do dashboard atualiza a agenda;
           // aqui só fechamos o modal — toast é disparado dentro do modal.
+        }}
+      />
+
+      {/* Painel IA — apoio à decisão clínica */}
+      <IAClinicalPanel
+        pacienteId={id}
+        entrada={{
+          paciente: {
+            nome: paciente.nome,
+            idade,
+            sexo: paciente.sexo,
+            setor: paciente.setor,
+            comorbidades: paciente.comorbidades,
+            medicamentos_uso: paciente.medicamentos_uso,
+            tabagismo_status: paciente.tabagismo_status,
+          },
+          protocolos: linhas.map(l => ({
+            codigo: l.protocolo_codigo,
+            nome: PROTOCOLO_MAP.get(l.protocolo_codigo)?.nome,
+            nivel_gravidade: l.nivel_gravidade,
+          })),
+          sinaisVitais: consultas[0]
+            ? {
+                pa_sistolica: consultas[0].pa_sistolica,
+                pa_diastolica: consultas[0].pa_diastolica,
+                fc: consultas[0].fc,
+                spo2: consultas[0].spo2,
+                peso: consultas[0].peso,
+                imc: consultas[0].imc,
+              }
+            : undefined,
         }}
       />
 
