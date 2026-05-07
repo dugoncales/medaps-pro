@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   title: "MedAPS Pro — APS Empresarial",
   description: "Sistema de gestão de protocolos clínicos para Atenção Primária à Saúde corporativa.",
   applicationName: "MedAPS Pro",
-  manifest: "/manifest.json",
+  // manifest é gerado por app/manifest.ts e injetado automaticamente
   appleWebApp: {
     capable: true,
     title: "MedAPS",

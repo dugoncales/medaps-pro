@@ -48,6 +48,9 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Pula assets do Next, ícones, PWA (manifest/SW/offline) e arquivos estáticos
+    // por extensão. Sem isso, o middleware redireciona /manifest.webmanifest para
+    // /login quando não há sessão e o Chrome falha o parse com "Line 1, column 1".
+    '/((?!_next/static|_next/image|favicon\\.ico|manifest\\.webmanifest|manifest\\.json|sw\\.js|offline\\.html|icons/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|json|webmanifest|txt)$).*)',
   ],
 }
