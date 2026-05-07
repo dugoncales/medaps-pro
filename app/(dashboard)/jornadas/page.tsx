@@ -330,7 +330,8 @@ export default async function JornadasPage() {
           </div>
         ) : (
           <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-[#E5E7EB] bg-[#F9FAFB] text-[11px] font-semibold uppercase tracking-[0.06em] text-[#6B7280]">
                   <th className="px-4 py-3 text-left">Paciente</th>
@@ -391,6 +392,7 @@ export default async function JornadasPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </section>

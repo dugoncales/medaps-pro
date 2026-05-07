@@ -395,14 +395,14 @@ export default function PacientePage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-xl font-bold text-white">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex items-start gap-3 sm:gap-4 min-w-0">
+          <div className="flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-full bg-blue-600 text-lg sm:text-xl font-bold text-white">
             {(paciente.nome ?? '').split(' ').filter(Boolean).slice(0, 2).map(n => n[0]).join('').toUpperCase() || '?'}
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">{paciente.nome ?? '—'}</h1>
-            <p className="text-sm text-slate-500">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg sm:text-xl font-bold text-slate-800 truncate">{paciente.nome ?? '—'}</h1>
+            <p className="text-xs sm:text-sm text-slate-500">
               {formatMatricula(paciente.matricula)} · {idade} anos · {paciente.setor?.trim() || 'Setor não informado'}
               {paciente.tabagismo_status === 'atual' && ' · 🚬 Tabagista'}
             </p>
@@ -425,24 +425,25 @@ export default function PacientePage() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-3 gap-2 lg:flex lg:items-center lg:gap-2">
           <Button
             variant="outline"
             onClick={() => setEditarAberto(true)}
-            className="gap-1.5"
+            className="gap-1.5 w-full lg:w-auto"
           >
-            ✏️ Editar
+            ✏️ <span className="hidden sm:inline">Editar</span>
           </Button>
           <Button
             variant="outline"
             onClick={() => setAgendarAberto({})}
-            className="gap-1.5"
+            className="gap-1.5 w-full lg:w-auto"
           >
-            📅 Agendar
+            📅 <span className="hidden sm:inline">Agendar</span>
           </Button>
-          <Link href={`/pacientes/${id}/consulta`}>
-            <Button className="bg-blue-600 hover:bg-blue-500 gap-2">
-              📋 Nova Consulta
+          <Link href={`/pacientes/${id}/consulta`} className="w-full lg:w-auto">
+            <Button className="w-full bg-blue-600 hover:bg-blue-500 gap-2 lg:w-auto">
+              📋 <span className="hidden sm:inline">Nova Consulta</span>
+              <span className="sm:hidden">Consulta</span>
             </Button>
           </Link>
         </div>
@@ -481,22 +482,24 @@ export default function PacientePage() {
 
       {/* Tabs */}
       <Tabs value={tabAtual} onValueChange={(v) => setTabAtual(v as TabValue)}>
-        <TabsList className="w-full justify-start border-b border-slate-200 bg-transparent rounded-none p-0 gap-0 flex-wrap h-auto">
-          {['resumo', 'jornada', 'consultas', 'evolucao', 'escalas', 'exames', 'alertas'].map(tab => (
-            <TabsTrigger
-              key={tab}
-              value={tab}
-              className="rounded-none border-b-2 border-transparent px-4 py-2 text-sm font-medium text-slate-500 capitalize data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 data-[state=active]:bg-transparent"
-            >
-              {tab === 'resumo' ? 'Resumo' :
-               tab === 'jornada' ? '🗺️ Jornada' :
-               tab === 'consultas' ? 'Consultas' :
-               tab === 'evolucao' ? 'Evolução' :
-               tab === 'escalas' ? '📊 Escalas' :
-               tab === 'exames' ? 'Exames' : 'Alertas'}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="border-b border-slate-200 -mx-4 md:-mx-6 lg:mx-0 overflow-x-auto">
+          <TabsList className="w-max min-w-full justify-start bg-transparent rounded-none p-0 gap-0 h-auto px-4 md:px-6 lg:px-0">
+            {['resumo', 'jornada', 'consultas', 'evolucao', 'escalas', 'exames', 'alertas'].map(tab => (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="shrink-0 rounded-none border-b-2 border-transparent px-3 sm:px-4 py-2 text-sm font-medium text-slate-500 capitalize data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 data-[state=active]:bg-transparent"
+              >
+                {tab === 'resumo' ? 'Resumo' :
+                 tab === 'jornada' ? '🗺️ Jornada' :
+                 tab === 'consultas' ? 'Consultas' :
+                 tab === 'evolucao' ? 'Evolução' :
+                 tab === 'escalas' ? '📊 Escalas' :
+                 tab === 'exames' ? 'Exames' : 'Alertas'}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         {/* Jornada */}
         <TabsContent value="jornada" className="pt-4">
@@ -665,6 +668,7 @@ export default function PacientePage() {
         {/* Exames */}
         <TabsContent value="exames" className="pt-4">
           <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-xs font-semibold uppercase text-slate-500">
@@ -697,6 +701,7 @@ export default function PacientePage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </TabsContent>
 

@@ -124,30 +124,32 @@ export default function PacientesPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-[#111827]">Pacientes</h1>
-          <p className="text-sm text-[#6B7280] mt-0.5">{todosPacientes.length} colaboradores em linha de cuidado</p>
+          <p className="text-sm text-[#6B7280] mt-0.5 truncate">{todosPacientes.length} colaboradores em linha de cuidado</p>
         </div>
-        <Link href="/pacientes/novo">
+        <Link href="/pacientes/novo" className="shrink-0">
           <Button className="gap-2">
-            <span>＋</span> Novo Paciente
+            <span>＋</span>
+            <span className="hidden sm:inline">Novo Paciente</span>
+            <span className="sm:hidden">Novo</span>
           </Button>
         </Link>
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:gap-3">
         <Input
           placeholder="Buscar por nome ou matrícula…"
           value={busca}
           onChange={e => { setBusca(e.target.value); setPagina(1) }}
-          className="w-64"
+          className="w-full sm:w-64"
         />
         <select
           value={filtroProtocolo}
           onChange={e => { setFiltroProtocolo(e.target.value); setPagina(1) }}
-          className="h-10 rounded-md border-[1.5px] border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#111827] transition-shadow focus:outline-none focus:border-[#1E40AF] focus:ring-[3px] focus:ring-[#1E40AF]/15"
+          className="h-10 w-full sm:w-auto rounded-md border-[1.5px] border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#111827] transition-shadow focus:outline-none focus:border-[#1E40AF] focus:ring-[3px] focus:ring-[#1E40AF]/15"
         >
           <option value="">Todos os protocolos</option>
           {protocoosUnicos.map(cod => (
@@ -157,7 +159,7 @@ export default function PacientesPage() {
         <select
           value={filtroStatus}
           onChange={e => { setFiltroStatus(e.target.value as StatusControle | ''); setPagina(1) }}
-          className="h-10 rounded-md border-[1.5px] border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#111827] transition-shadow focus:outline-none focus:border-[#1E40AF] focus:ring-[3px] focus:ring-[#1E40AF]/15"
+          className="h-10 w-full sm:w-auto rounded-md border-[1.5px] border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#111827] transition-shadow focus:outline-none focus:border-[#1E40AF] focus:ring-[3px] focus:ring-[#1E40AF]/15"
         >
           <option value="">Todos os status</option>
           <option value="controlado">Controlado</option>
@@ -166,8 +168,80 @@ export default function PacientesPage() {
         </select>
       </div>
 
-      {/* Tabela */}
-      <div className="rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] overflow-hidden">
+      {/* Cards (mobile) */}
+      <div className="space-y-2 md:hidden">
+        {paginados.length === 0 && (
+          <div className="rounded-xl border border-[#E5E7EB] bg-white px-5 py-8 text-center text-sm text-[#9CA3AF]">
+            Nenhum paciente encontrado.
+          </div>
+        )}
+        {paginados.map(({ p, linhas, ultima, proximo, retornoStatus, status }) => (
+          <div
+            key={p.id}
+            className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-[0_1px_2px_0_rgba(0,0,0,0.04)]"
+          >
+            <Link href={`/pacientes/${p.id}`} className="flex items-start gap-3">
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
+                style={{ backgroundColor: getAvatarColor(p.id) }}
+              >
+                {getInitials(p.nome)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-[#111827] truncate">{p.nome}</div>
+                <div className="text-xs text-[#9CA3AF] mt-0.5">
+                  {p.matricula} · {calcularIdade(p.data_nascimento)} anos
+                  {p.setor?.trim() && <span> · {p.setor}</span>}
+                </div>
+              </div>
+              <StatusPill status={status} size="sm" />
+            </Link>
+
+            {linhas.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-3">
+                {linhas.map(l => {
+                  const prot = PROTOCOLO_MAP.get(l.protocolo_codigo)
+                  return (
+                    <span
+                      key={l.id}
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                      style={{ backgroundColor: prot?.cor ?? '#6B7280' }}
+                    >
+                      {l.protocolo_codigo}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-[#F1F5F9] text-xs">
+              <div className="min-w-0 flex-1">
+                <p className="text-[#9CA3AF]">Última: <span className="text-[#6B7280] num-tabular">{ultima ? new Date(ultima.data_consulta).toLocaleDateString('pt-BR') : '—'}</span></p>
+                {proximo ? (
+                  <p className={cn(
+                    'mt-0.5 font-semibold num-tabular',
+                    retornoStatus === 'vencido' ? 'text-[#DC2626]' :
+                    retornoStatus === 'proximo' ? 'text-[#D97706]' : 'text-[#059669]'
+                  )}>
+                    Retorno: {new Date(proximo).toLocaleDateString('pt-BR')}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-[#9CA3AF]">Sem retorno agendado</p>
+                )}
+              </div>
+              <Link
+                href={`/pacientes/${p.id}/consulta`}
+                className="shrink-0 rounded-lg bg-[#1E40AF] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1E3A8A] transition-colors"
+              >
+                Atender
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabela (desktop) */}
+      <div className="hidden md:block rounded-xl border border-[#E5E7EB] bg-white shadow-[0_1px_2px_0_rgba(0,0,0,0.04)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -256,7 +330,7 @@ export default function PacientesPage() {
           </table>
         </div>
 
-        {/* Paginação */}
+        {/* Paginação (desktop) */}
         {totalPaginas > 1 && (
           <div className="flex items-center justify-between border-t border-[#E5E7EB] bg-[#F9FAFB] px-5 py-3">
             <p className="text-xs text-[#6B7280]">
@@ -295,6 +369,29 @@ export default function PacientesPage() {
           </div>
         )}
       </div>
+
+      {/* Paginação (mobile) */}
+      {totalPaginas > 1 && (
+        <div className="md:hidden flex items-center justify-between gap-2 rounded-xl border border-[#E5E7EB] bg-white px-4 py-3 shadow-[0_1px_2px_0_rgba(0,0,0,0.04)]">
+          <button
+            onClick={() => setPagina(p => Math.max(1, p - 1))}
+            disabled={pagina === 1}
+            className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs font-medium text-[#6B7280] disabled:opacity-40 transition-colors"
+          >
+            ← Anterior
+          </button>
+          <span className="text-xs text-[#6B7280] num-tabular">
+            Página <span className="font-semibold text-[#111827]">{pagina}</span> de <span className="font-semibold text-[#111827]">{totalPaginas}</span>
+          </span>
+          <button
+            onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+            disabled={pagina === totalPaginas}
+            className="rounded-md border border-[#E5E7EB] bg-white px-3 py-1.5 text-xs font-medium text-[#6B7280] disabled:opacity-40 transition-colors"
+          >
+            Próxima →
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -357,12 +357,12 @@ export default function NovoPacientePage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-slate-800">Novo Paciente</h1>
-          <p className="text-sm text-slate-500">Preencha os dados para criar a linha de cuidado</p>
+          <p className="text-sm text-slate-500 truncate">Preencha os dados para criar a linha de cuidado</p>
         </div>
-        <Button variant="outline" type="button" onClick={() => router.back()}>Cancelar</Button>
+        <Button variant="outline" type="button" onClick={() => router.back()} className="shrink-0">Cancelar</Button>
       </div>
 
       {erroGeral && (
@@ -597,11 +597,11 @@ export default function NovoPacientePage() {
         </div>
 
         {/* Botões */}
-        <div className="flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={() => router.back()} disabled={salvando}>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+          <Button type="button" variant="outline" onClick={() => router.back()} disabled={salvando} className="w-full sm:w-auto">
             Cancelar
           </Button>
-          <Button type="submit" className="bg-blue-600 hover:bg-blue-500 gap-2" disabled={salvando}>
+          <Button type="submit" className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 gap-2" disabled={salvando}>
             {salvando ? 'Salvando…' : '💾 Salvar Paciente'}
           </Button>
         </div>

@@ -157,21 +157,21 @@ export default function AlertasPage() {
       )}
 
       {/* Contadores */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-xl border-2 border-red-200 bg-red-50 p-4 text-center">
-          <p className="text-3xl font-bold text-red-600 num-tabular">{urgentes.length}</p>
-          <p className="text-sm font-semibold text-red-700 mt-1">🚨 Urgente</p>
-          <p className="text-xs text-red-500 mt-0.5">Ação imediata necessária</p>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+        <div className="rounded-xl border-2 border-red-200 bg-red-50 p-3 sm:p-4 text-center">
+          <p className="text-2xl sm:text-3xl font-bold text-red-600 num-tabular">{urgentes.length}</p>
+          <p className="text-xs sm:text-sm font-semibold text-red-700 mt-1">🚨 Urgente</p>
+          <p className="hidden sm:block text-xs text-red-500 mt-0.5">Ação imediata necessária</p>
         </div>
-        <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 text-center">
-          <p className="text-3xl font-bold text-amber-600 num-tabular">{atencao.length}</p>
-          <p className="text-sm font-semibold text-amber-700 mt-1">⚠️ Atenção</p>
-          <p className="text-xs text-amber-500 mt-0.5">Resolver em até 7 dias</p>
+        <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-3 sm:p-4 text-center">
+          <p className="text-2xl sm:text-3xl font-bold text-amber-600 num-tabular">{atencao.length}</p>
+          <p className="text-xs sm:text-sm font-semibold text-amber-700 mt-1">⚠️ Atenção</p>
+          <p className="hidden sm:block text-xs text-amber-500 mt-0.5">Resolver em até 7 dias</p>
         </div>
-        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 text-center">
-          <p className="text-3xl font-bold text-emerald-600 num-tabular">{informativos.length}</p>
-          <p className="text-sm font-semibold text-emerald-700 mt-1">ℹ️ Informativo</p>
-          <p className="text-xs text-emerald-500 mt-0.5">Monitorar</p>
+        <div className="rounded-xl border-2 border-emerald-200 bg-emerald-50 p-3 sm:p-4 text-center">
+          <p className="text-2xl sm:text-3xl font-bold text-emerald-600 num-tabular">{informativos.length}</p>
+          <p className="text-xs sm:text-sm font-semibold text-emerald-700 mt-1">ℹ️ Informativo</p>
+          <p className="hidden sm:block text-xs text-emerald-500 mt-0.5">Monitorar</p>
         </div>
       </div>
 
