@@ -27,6 +27,15 @@ import { useToastStore } from '@/lib/store/toast-store'
 import { cn } from '@/lib/utils'
 import type { StatusControle } from '@/types'
 
+const JUSTIFICATIVAS_AVANCO = [
+  'Metas atingidas no período',
+  'Adesão consistente ao tratamento',
+  'Exames de controle dentro da meta',
+  'Avaliação clínica favorável',
+  'Decisão da equipe multidisciplinar',
+  'Outra (descrever em observação)',
+] as const
+
 // Linha pronta pra INSERT em proms_aplicados
 interface PromInsert {
   empresa_id: string
@@ -740,6 +749,17 @@ export default function ConsultaPage() {
   const [promsJaSalvos, setPromsJaSalvos] = useState<Set<EscalaCodigo>>(new Set())
   const [salvandoProms, setSalvandoProms] = useState(false)
   const [gerandoIA, setGerandoIA] = useState(false)
+  // Avanços por protocolo: o profissional decide marcar avanço de passo,
+  // mudar status de controle e/ou registrar observação da equipe (sem SOAP).
+  // Persistido em evolucoes_clinicas no finalizar.
+  const [avancosProtocolo, setAvancosProtocolo] = useState<
+    Record<string, {
+      passo_novo?: number
+      status_novo?: 'controlado' | 'parcial' | 'descontrolado'
+      justificativa?: string
+      observacao?: string
+    }>
+  >({})
   const pushToast = useToastStore((s) => s.push)
 
   const imc = calcIMC(vitais.peso, vitais.altura)
@@ -930,8 +950,73 @@ export default function ConsultaPage() {
     )
   }
 
+  /**
+   * Persiste em evolucoes_clinicas as atualizações marcadas na aba Jornada
+   * (avanço de passo, mudança de status, observação da equipe). Cada protocolo
+   * com pelo menos um campo preenchido vira uma row.
+   *
+   * Falhas individuais são logadas mas não bloqueiam o restante do fluxo —
+   * o atendimento ainda finaliza e o usuário recebe um toast de aviso.
+   */
+  async function salvarAvancosProtocolo(): Promise<{ ok: number; falhou: number }> {
+    if (!paciente) return { ok: 0, falhou: 0 }
+    const codigos = Object.keys(avancosProtocolo).filter(cod => {
+      const a = avancosProtocolo[cod]
+      return Boolean(a?.passo_novo || a?.status_novo || a?.observacao?.trim())
+    })
+    if (codigos.length === 0) return { ok: 0, falhou: 0 }
+
+    if (IS_DEMO_MODE) return { ok: codigos.length, falhou: 0 }
+
+    const supabase = createClient()
+    const linhasInsert = codigos.map(cod => {
+      const a = avancosProtocolo[cod]
+      const linha = linhasAtivas.find(l => l.protocolo_codigo === cod)
+      const passoAnterior = linha?.nivel_gravidade === 'controlado' ? 5 :
+                             linha?.nivel_gravidade === 'parcial' ? 3 : 2
+      return {
+        paciente_id: id,
+        consulta_id: null,
+        protocolo_codigo: cod,
+        passo_protocolo: a.passo_novo ?? passoAnterior,
+        status_controle: a.status_novo ?? linha?.nivel_gravidade ?? null,
+        metricas: {
+          observacao_equipe: a.observacao?.trim() || undefined,
+          justificativa_avanco: a.justificativa || undefined,
+          passo_anterior: passoAnterior,
+          origem: 'tela_atendimento',
+        },
+      }
+    })
+
+    const { error } = await supabase.from('evolucoes_clinicas').insert(linhasInsert)
+    if (error) {
+      console.error('[atendimento] insert evolucoes_clinicas:', error)
+      return { ok: 0, falhou: codigos.length }
+    }
+    return { ok: codigos.length, falhou: 0 }
+  }
+
   async function finalizarConsulta() {
     setSalvando(true)
+
+    // Persiste avanços de jornada antes do resumo, para que a próxima leitura
+    // do motor já reflita o novo passo/status.
+    const resAvancos = await salvarAvancosProtocolo()
+    if (resAvancos.falhou > 0) {
+      pushToast({
+        tipo: 'critico',
+        titulo: 'Falha ao salvar avanços',
+        descricao: `${resAvancos.falhou} protocolo(s) não foram persistidos. Verifique o console.`,
+      })
+    } else if (resAvancos.ok > 0) {
+      pushToast({
+        tipo: 'sucesso',
+        titulo: 'Jornada atualizada',
+        descricao: `${resAvancos.ok} protocolo(s) registrados em evolução clínica.`,
+      })
+    }
+
 
     // Build flattened metricas for each protocol
     const historico = demoConsultas.filter(c => c.paciente_id === id)
@@ -1072,6 +1157,14 @@ export default function ConsultaPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
+      {/* Cabeçalho da tela */}
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Registrar Atendimento</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Atualize a jornada clínica do paciente — dados clínicos vão para o Amplimed.
+        </p>
+      </div>
+
       {/* Seção 1 — Identificação */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1116,14 +1209,14 @@ export default function ConsultaPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="vitais">
+      <Tabs defaultValue="jornada">
         <TabsList className="grid w-full grid-cols-5 bg-slate-100 p-1 rounded-xl h-auto">
           {[
-            { value: 'vitais', label: '🩺 Sinais Vitais' },
-            { value: 'protocolos', label: '📋 Protocolos' },
+            { value: 'jornada', label: '📍 Jornada' },
             { value: 'proms', label: '📊 PROMs' },
-            { value: 'exames', label: '🔬 Exames' },
-            { value: 'plano', label: '📝 Plano SOAP' },
+            { value: 'vitais', label: '🩺 Sinais Vitais' },
+            { value: 'exames', label: '🧪 Exames' },
+            { value: 'plano', label: '📝 SOAP' },
           ].map(t => (
             <TabsTrigger
               key={t.value}
@@ -1225,8 +1318,8 @@ export default function ConsultaPage() {
           </div>
         </TabsContent>
 
-        {/* Seção 3 — Protocolos */}
-        <TabsContent value="protocolos" className="pt-4">
+        {/* Seção — Jornada (substitui antiga aba "Protocolos") */}
+        <TabsContent value="jornada" className="pt-4">
           {linhasAtivas.length === 0 && (
             <p className="py-8 text-center text-sm text-slate-400">Paciente sem linhas de cuidado ativas.</p>
           )}
@@ -1256,10 +1349,38 @@ export default function ConsultaPage() {
             {linhasAtivas.map(l => {
               const protocolo = PROTOCOLO_MAP.get(l.protocolo_codigo)
               if (!protocolo) return null
+              const cod = l.protocolo_codigo
               const passoAtual = l.nivel_gravidade === 'controlado' ? 5 :
                                  l.nivel_gravidade === 'parcial' ? 3 : 2
+              const totalPassos = protocolo.passos_fluxo.length
+              const podeAvancar = passoAtual < totalPassos
+              const proximoPassoIdx = Math.min(totalPassos - 1, passoAtual)
+              const proximoPasso = protocolo.passos_fluxo[proximoPassoIdx]
+              const ultimaConsulta = demoConsultas
+                .filter(c => c.paciente_id === id && c.protocolos_abordados.includes(cod))
+                .sort((a, b) => new Date(b.data_consulta).getTime() - new Date(a.data_consulta).getTime())[0]
+              const diasSemAtendimento = ultimaConsulta
+                ? Math.floor((Date.now() - new Date(ultimaConsulta.data_consulta).getTime()) / 86400000)
+                : null
+              const avanco = avancosProtocolo[cod] ?? {}
+              const statusEfetivo = avanco.status_novo ?? l.nivel_gravidade ?? undefined
+              const passoMarcado = avanco.passo_novo ?? null
+
+              const setAvanco = (
+                patch: Partial<{
+                  passo_novo: number
+                  status_novo: 'controlado' | 'parcial' | 'descontrolado'
+                  justificativa: string
+                  observacao: string
+                }>,
+              ) =>
+                setAvancosProtocolo(prev => ({
+                  ...prev,
+                  [cod]: { ...prev[cod], ...patch },
+                }))
+
               return (
-                <TabsContent key={l.protocolo_codigo} value={l.protocolo_codigo}>
+                <TabsContent key={cod} value={cod}>
                   <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-5">
                     {/* Status alert */}
                     <div className={cn(
@@ -1268,43 +1389,151 @@ export default function ConsultaPage() {
                       l.nivel_gravidade === 'parcial' ? 'border-amber-200 bg-amber-50' :
                       'border-red-200 bg-red-50'
                     )}>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{protocolo.icone}</span>
-                        <div>
-                          <p className="font-semibold text-slate-800">{protocolo.nome}</p>
-                          <p className="text-xs text-slate-600">
-                            Status: {l.nivel_gravidade ? <StatusPill status={l.nivel_gravidade} size="sm" /> : '—'}
-                            {' · '}Meta: {protocolo.criterios_controle[0]}
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="text-2xl">{protocolo.icone}</span>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-800">{protocolo.nome}</p>
+                            <p className="text-xs text-slate-600">
+                              Status atual: {l.nivel_gravidade ? <StatusPill status={l.nivel_gravidade} size="sm" /> : '—'}
+                              {' · '}Meta: {protocolo.criterios_controle[0]}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right text-xs text-slate-500">
+                          <p>
+                            Última atualização: <span className="font-medium text-slate-700 num-tabular">
+                              {ultimaConsulta ? new Date(ultimaConsulta.data_consulta).toLocaleDateString('pt-BR') : '—'}
+                            </span>
                           </p>
+                          {diasSemAtendimento !== null && (
+                            <p className="num-tabular">{diasSemAtendimento}d sem atendimento</p>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Stepper */}
+                    {/* Stepper visual */}
                     <div>
-                      <h4 className="mb-3 text-xs font-semibold uppercase text-slate-500">Fluxo do Protocolo</h4>
-                      <StepperProtocolo codigo={l.protocolo_codigo} passoAtual={passoAtual} />
+                      <h4 className="mb-3 text-xs font-semibold uppercase text-slate-500">
+                        Progresso da Jornada — passo {passoAtual} de {totalPassos}
+                      </h4>
+                      <StepperProtocolo codigo={cod} passoAtual={passoAtual} />
                     </div>
 
-                    {/* Sugestão */}
-                    {protocolo.passos_fluxo[passoAtual - 1] && (
-                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-                        <p className="text-xs font-semibold text-blue-700">
-                          💡 Passo atual: {protocolo.passos_fluxo[passoAtual - 1].titulo}
-                        </p>
-                        <p className="text-xs text-blue-600 mt-0.5">
-                          {protocolo.passos_fluxo[passoAtual - 1].descricao}
-                        </p>
+                    {/* Avançar passo */}
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase text-slate-500">Avanço de passo</p>
+                          {proximoPasso ? (
+                            <p className="text-sm text-slate-700 mt-0.5">
+                              <span className="font-medium">Próximo:</span> Passo {proximoPasso.numero} — {proximoPasso.titulo}
+                            </p>
+                          ) : (
+                            <p className="text-sm text-emerald-700 font-medium mt-0.5">🏆 Paciente já no último passo do protocolo</p>
+                          )}
+                        </div>
+                        {podeAvancar && (
+                          passoMarcado === proximoPasso?.numero ? (
+                            <Button
+                              variant="outline"
+                              onClick={() => setAvancosProtocolo(prev => {
+                                const next = { ...prev }
+                                if (next[cod]) {
+                                  const { passo_novo: _drop, ...rest } = next[cod]
+                                  next[cod] = rest
+                                }
+                                return next
+                              })}
+                              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 gap-1.5 h-8 text-xs"
+                            >
+                              ✅ Avanço marcado · desfazer
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => setAvanco({ passo_novo: proximoPasso!.numero })}
+                              className="bg-emerald-600 hover:bg-emerald-500 gap-1.5 h-8 text-xs"
+                            >
+                              ✅ Avançar para passo {proximoPasso!.numero}
+                            </Button>
+                          )
+                        )}
                       </div>
-                    )}
 
-                    {/* Campos específicos */}
+                      {passoMarcado && (
+                        <div>
+                          <Label className="text-xs">Justificativa do avanço</Label>
+                          <select
+                            value={avanco.justificativa ?? ''}
+                            onChange={e => setAvanco({ justificativa: e.target.value })}
+                            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="">Selecione…</option>
+                            {JUSTIFICATIVAS_AVANCO.map(j => (
+                              <option key={j} value={j}>{j}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Status de controle */}
                     <div>
-                      <h4 className="mb-3 text-xs font-semibold uppercase text-slate-500">Dados desta consulta</h4>
-                      <CamposProtocolo
-                        codigo={l.protocolo_codigo}
-                        metricas={metricas[l.protocolo_codigo] ?? {}}
-                        setMetrica={(k, v) => setMetricaProtocolo(l.protocolo_codigo, k, v)}
+                      <Label className="text-xs font-semibold uppercase text-slate-500">Status de controle</Label>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(['controlado', 'parcial', 'descontrolado'] as const).map(s => {
+                          const ativo = statusEfetivo === s
+                          const cores = {
+                            controlado: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+                            parcial: 'border-amber-300 bg-amber-50 text-amber-700',
+                            descontrolado: 'border-red-300 bg-red-50 text-red-700',
+                          }[s]
+                          return (
+                            <button
+                              key={s}
+                              type="button"
+                              onClick={() => setAvanco({ status_novo: s })}
+                              className={cn(
+                                'rounded-full border px-3 py-1 text-xs font-semibold capitalize transition-all',
+                                ativo ? `${cores} ring-2 ring-offset-1 ring-current` : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50',
+                              )}
+                            >
+                              {s}
+                            </button>
+                          )
+                        })}
+                        {avanco.status_novo && (
+                          <button
+                            type="button"
+                            onClick={() => setAvancosProtocolo(prev => {
+                              const next = { ...prev }
+                              if (next[cod]) {
+                                const { status_novo: _drop, ...rest } = next[cod]
+                                next[cod] = rest
+                              }
+                              return next
+                            })}
+                            className="text-xs text-slate-400 hover:text-slate-600 underline ml-1"
+                          >
+                            limpar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Observação da equipe (não-SOAP) */}
+                    <div>
+                      <Label className="text-xs font-semibold uppercase text-slate-500">
+                        Observação da equipe
+                        <span className="ml-1 text-[10px] font-normal normal-case text-slate-400">(não-SOAP — fica registrado na linha de cuidado)</span>
+                      </Label>
+                      <Textarea
+                        value={avanco.observacao ?? ''}
+                        onChange={e => setAvanco({ observacao: e.target.value })}
+                        placeholder="Ex: Paciente trouxe MAPA com média de 132/82, manter conduta. Cobrar exames laboratoriais no próximo retorno."
+                        rows={2}
+                        className="mt-1"
                       />
                     </div>
                   </div>
@@ -1511,9 +1740,21 @@ export default function ConsultaPage() {
           </div>
         </TabsContent>
 
-        {/* Seção 5 — Plano SOAP */}
-        <TabsContent value="plano" className="pt-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        {/* Seção — SOAP (secundário, colapsado por padrão) */}
+        <TabsContent value="plano" className="pt-4 space-y-3">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p className="font-semibold">📝 Registro clínico detalhado</p>
+            <p className="text-xs mt-0.5 leading-relaxed">
+              Use o <strong>Amplimed como prontuário principal</strong>. Os campos abaixo ficam aqui apenas
+              para anotações pontuais — o registro clínico oficial deve ser feito no Amplimed.
+            </p>
+          </div>
+          <details className="rounded-xl border border-slate-200 bg-white shadow-sm group">
+            <summary className="cursor-pointer list-none px-5 py-3 flex items-center justify-between text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-t-xl">
+              <span>📝 Expandir SOAP (uso opcional)</span>
+              <span className="text-slate-400 text-xs group-open:rotate-90 transition-transform">▸</span>
+            </summary>
+            <div className="border-t border-slate-200 p-5 space-y-4">
             <div className="grid grid-cols-1 gap-4">
               {[
                 { key: 's' as const, label: 'S — Subjetivo', placeholder: 'Queixas, sintomas referidos pelo paciente…' },
@@ -1587,28 +1828,31 @@ export default function ConsultaPage() {
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="outline" onClick={() => router.back()}>
-                Cancelar
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => alert('Rascunho salvo (demo)')}
-                className="border-amber-300 text-amber-700 hover:bg-amber-50"
-              >
-                💾 Salvar Rascunho
-              </Button>
-              <Button
-                onClick={finalizarConsulta}
-                disabled={salvando}
-                className="bg-blue-600 hover:bg-blue-500"
-              >
-                {salvando ? 'Salvando…' : '✅ Finalizar Consulta'}
-              </Button>
-            </div>
           </div>
+          </details>
         </TabsContent>
       </Tabs>
+
+      {/* Barra de ações final — sempre visível, fora das tabs */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+        <Button variant="outline" onClick={() => router.back()} className="w-full sm:w-auto">
+          Cancelar
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => alert('Rascunho salvo (demo)')}
+          className="w-full sm:w-auto border-amber-300 text-amber-700 hover:bg-amber-50"
+        >
+          💾 Salvar Rascunho
+        </Button>
+        <Button
+          onClick={finalizarConsulta}
+          disabled={salvando}
+          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500"
+        >
+          {salvando ? 'Salvando…' : '✅ Finalizar Atendimento'}
+        </Button>
+      </div>
 
       <PREMModal
         aberto={mostrarPrem}
