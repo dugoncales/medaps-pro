@@ -5,12 +5,20 @@ import { NextResponse, type NextRequest } from 'next/server'
 // funciona, mas algumas rotas/edge regions retornam 404 silencioso, então
 // padronizamos no query param para ter um único caminho de auth.
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-// Gemini 1.5 foi descontinuado pelo Google — passamos para 2.0 Flash.
-const GEMINI_MODEL_PRIMARY = 'gemini-2.0-flash'
-const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash-lite'
+// 2.5 Flash preview tem cota separada do 2.0 — útil quando o tier free do 2.0
+// satura. Fallback para 2.0 cobre o caso do preview ficar indisponível.
+const GEMINI_MODEL_PRIMARY = 'gemini-2.5-flash-preview-05-20'
+const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash'
+
+const RATE_LIMIT_MAX_RETRIES = 2
+const RATE_LIMIT_BASE_DELAY_MS = 2000
 
 function buildUrl(model: string, apiKey: string): string {
   return `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 const SYSTEM_PROMPT = `Você é um consultor clínico especializado em Medicina do Trabalho e Atenção Primária à Saúde (APS) corporativa, atuando como apoio à decisão para o profissional médico do MedAPS Pro.
@@ -165,17 +173,42 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  // Retry com backoff exponencial em 429. Total de tentativas =
+  // 1 inicial + RATE_LIMIT_MAX_RETRIES. Outros status retornam imediatamente.
+  async function callComRetry(model: string): Promise<Response> {
+    let delay = RATE_LIMIT_BASE_DELAY_MS
+    for (let tentativa = 0; tentativa <= RATE_LIMIT_MAX_RETRIES; tentativa++) {
+      const res = await callGemini(model)
+      if (res.status !== 429) return res
+      if (tentativa === RATE_LIMIT_MAX_RETRIES) return res
+      console.warn(`[Gemini] 429 (tentativa ${tentativa + 1}); aguardando ${delay}ms`)
+      await sleep(delay)
+      delay *= 2
+    }
+    // unreachable — for-loop sempre retorna no última iteração
+    return callGemini(model)
+  }
+
   try {
-    let upstream = await callGemini(GEMINI_MODEL_PRIMARY)
+    let upstream = await callComRetry(GEMINI_MODEL_PRIMARY)
     console.log('[Gemini] status:', upstream.status)
 
-    // Modelos do Gemini são versionados — quando o Google promove o snapshot,
-    // o alias estável (gemini-1.5-flash) pode retornar 404 enquanto o `-latest`
-    // continua funcionando. Tenta o fallback uma única vez nesse caso.
+    // 404 → modelo primário pode ter sido descontinuado; tenta fallback.
     if (upstream.status === 404) {
       console.warn('[Gemini] 404 no modelo primário; tentando fallback', GEMINI_MODEL_FALLBACK)
-      upstream = await callGemini(GEMINI_MODEL_FALLBACK)
+      upstream = await callComRetry(GEMINI_MODEL_FALLBACK)
       console.log('[Gemini] status (fallback):', upstream.status)
+    }
+
+    if (upstream.status === 429) {
+      return NextResponse.json(
+        {
+          error:
+            'IA temporariamente indisponível — limite de requisições atingido. Tente novamente em 1 minuto.',
+          code: 'rate_limit',
+        },
+        { status: 429 },
+      )
     }
 
     if (!upstream.ok) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { renderMarkdownSafe } from '@/lib/markdown-safe'
+import { useRateLimitCountdown } from '@/lib/use-rate-limit-countdown'
 
 export interface PromptIAEntrada {
   paciente?: {
@@ -42,6 +43,7 @@ export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: 
   const [carregando, setCarregando] = useState(false)
   const [markdown, setMarkdown] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const rateLimit = useRateLimitCountdown(60)
 
   // Restaura cache da sessão para o paciente atual
   useEffect(() => {
@@ -59,7 +61,11 @@ export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entrada),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 429 || data?.code === 'rate_limit') {
+        rateLimit.marcar()
+        return
+      }
       if (!res.ok) {
         setErro(data?.error ?? `Erro HTTP ${res.status}`)
         return
@@ -69,6 +75,7 @@ export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: 
         setErro('Resposta vazia do modelo.')
         return
       }
+      rateLimit.limpar()
       setMarkdown(md)
       try {
         window.sessionStorage.setItem(STORAGE_PREFIX + pacienteId, md)
@@ -130,7 +137,14 @@ export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: 
             </div>
           ) : null}
 
-          {erro && (
+          {rateLimit.ativo && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center justify-between gap-2">
+              <span>⏳ Muitas requisições simultâneas. Aguarde 1 minuto e tente novamente.</span>
+              <span className="font-mono font-bold tabular-nums shrink-0">{rateLimit.segundosRestantes}s</span>
+            </div>
+          )}
+
+          {erro && !rateLimit.ativo && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               ⚠️ {erro}
             </div>
@@ -141,7 +155,7 @@ export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: 
               Sugestão de apoio. A decisão clínica é do profissional responsável.
             </p>
             <div className="flex gap-2 shrink-0">
-              {markdown ? (
+              {rateLimit.ativo ? null : markdown ? (
                 <Button
                   variant="outline"
                   onClick={regerar}

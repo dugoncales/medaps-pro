@@ -1,13 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-// API key vai como `?key=` (mesmo padrão do ia-clinica). Modelo 2.0 — 1.5 foi
-// descontinuado pelo Google.
+// API key vai como `?key=` (mesmo padrão do ia-clinica). 2.5 Flash preview tem
+// cota separada do 2.0 — útil quando o tier free do 2.0 satura.
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-const GEMINI_MODEL_PRIMARY = 'gemini-2.0-flash'
-const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash-lite'
+const GEMINI_MODEL_PRIMARY = 'gemini-2.5-flash-preview-05-20'
+const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash'
+
+const RATE_LIMIT_MAX_RETRIES = 2
+const RATE_LIMIT_BASE_DELAY_MS = 2000
 
 function buildUrl(model: string, apiKey: string): string {
   return `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }
 
 const SYSTEM_PROMPT_ANALISE = `Você é um epidemiologista e gestor de saúde populacional especializado em APS empresarial, atuando como consultor estratégico para o time clínico do MedAPS Pro.
@@ -182,14 +189,39 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  // Retry com backoff exponencial em 429.
+  async function callComRetry(model: string): Promise<Response> {
+    let delay = RATE_LIMIT_BASE_DELAY_MS
+    for (let tentativa = 0; tentativa <= RATE_LIMIT_MAX_RETRIES; tentativa++) {
+      const res = await callGemini(model)
+      if (res.status !== 429) return res
+      if (tentativa === RATE_LIMIT_MAX_RETRIES) return res
+      console.warn(`[Gemini] 429 (tentativa ${tentativa + 1}); aguardando ${delay}ms`)
+      await sleep(delay)
+      delay *= 2
+    }
+    return callGemini(model)
+  }
+
   try {
-    let upstream = await callGemini(GEMINI_MODEL_PRIMARY)
+    let upstream = await callComRetry(GEMINI_MODEL_PRIMARY)
     console.log('[Gemini] status:', upstream.status)
 
     if (upstream.status === 404) {
       console.warn('[Gemini] 404 no modelo primário; tentando fallback', GEMINI_MODEL_FALLBACK)
-      upstream = await callGemini(GEMINI_MODEL_FALLBACK)
+      upstream = await callComRetry(GEMINI_MODEL_FALLBACK)
       console.log('[Gemini] status (fallback):', upstream.status)
+    }
+
+    if (upstream.status === 429) {
+      return NextResponse.json(
+        {
+          error:
+            'IA temporariamente indisponível — limite de requisições atingido. Tente novamente em 1 minuto.',
+          code: 'rate_limit',
+        },
+        { status: 429 },
+      )
     }
 
     if (!upstream.ok) {
