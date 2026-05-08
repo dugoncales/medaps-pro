@@ -95,6 +95,11 @@ function AgendarConsultaModalInner({
 
       if (!IS_DEMO_MODE) {
         const supabase = createClient()
+        // INSERT só com colunas da tabela. O Supabase rejeita o select
+        // encadeado com relação no mesmo request quando RLS/joins não
+        // batem (400). Buscamos só a row inserida e enriquecemos com a
+        // prop pacienteNome (matricula/setor não são lidos pelo caller
+        // após o agendamento — o realtime channel da agenda repuxa).
         const { data, error } = await supabase
           .from('agendamentos')
           .insert({
@@ -105,10 +110,13 @@ function AgendarConsultaModalInner({
             protocolos_previstos: protocolosSelecionados,
             status: 'agendado',
           })
-          .select('*, paciente:pacientes(nome, matricula, setor)')
+          .select('*')
           .single()
         if (error) throw error
-        agendamento = data as Agendamento
+        agendamento = {
+          ...(data as Agendamento),
+          paciente: { nome: pacienteNome, matricula: '', setor: '' },
+        }
       } else {
         agendamento = {
           id: `ag-${Date.now()}`,
@@ -126,7 +134,7 @@ function AgendarConsultaModalInner({
       onAgendado(agendamento)
       pushToast({
         tipo: 'sucesso',
-        titulo: 'Consulta agendada',
+        titulo: 'Consulta agendada com sucesso',
         descricao: `${pacienteNome.split(' ')[0]} — ${dt.toLocaleString('pt-BR', {
           day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
         })}`,
