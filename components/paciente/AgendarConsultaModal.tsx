@@ -95,26 +95,34 @@ function AgendarConsultaModalInner({
 
       if (!IS_DEMO_MODE) {
         const supabase = createClient()
-        // INSERT só com colunas da tabela. O Supabase rejeita o select
-        // encadeado com relação no mesmo request quando RLS/joins não
-        // batem (400). Buscamos só a row inserida e enriquecemos com a
-        // prop pacienteNome (matricula/setor não são lidos pelo caller
-        // após o agendamento — o realtime channel da agenda repuxa).
+        // Pegamos só o id após o INSERT — quanto menos colunas o select
+        // retorna, menor a chance da RLS pós-insert falhar com 400. O
+        // resto do agendamento já está em memória (acabamos de gravá-lo)
+        // e o realtime channel da agenda repuxa a row completa.
+        const dataHoraIso = dt.toISOString()
+        const agora = new Date().toISOString()
         const { data, error } = await supabase
           .from('agendamentos')
           .insert({
             paciente_id: pacienteId,
             profissional_id: profissionalId ?? null,
-            data_hora: dt.toISOString(),
+            data_hora: dataHoraIso,
             tipo,
             protocolos_previstos: protocolosSelecionados,
             status: 'agendado',
           })
-          .select('*')
+          .select('id')
           .single()
         if (error) throw error
         agendamento = {
-          ...(data as Agendamento),
+          id: (data as { id: string }).id,
+          paciente_id: pacienteId,
+          profissional_id: profissionalId,
+          data_hora: dataHoraIso,
+          tipo,
+          protocolos_previstos: protocolosSelecionados,
+          status: 'agendado',
+          created_at: agora,
           paciente: { nome: pacienteNome, matricula: '', setor: '' },
         }
       } else {
