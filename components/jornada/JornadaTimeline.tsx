@@ -1,18 +1,28 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import type { StatusJornada, AcaoPendente } from '@/lib/jornada/motor'
 import type { Protocolo } from '@/lib/protocolos'
+import { resolverAcao } from '@/lib/jornada/acao-resolver'
+import { AcaoExecucaoModal, type AcaoModalModo } from '@/components/jornada/AcaoExecucaoModal'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface JornadaTimelineProps {
   statusJornada: StatusJornada
   protocolo: Protocolo
+  /** Nome do profissional logado — pré-preenche o modal de execução. */
+  profissionalNome?: string
   onAvancarPasso?: () => void
   onAgendarConsulta?: () => void
   className?: string
+}
+
+// Chave estável para identificar uma ação dentro da lista (sem id no tipo).
+function acaoKey(a: AcaoPendente): string {
+  return `${a.protocolo}|${a.passo}|${a.titulo}`
 }
 
 // ─── Step status helpers ──────────────────────────────────────────────────────
@@ -52,9 +62,25 @@ const PRIORIDADE_LABEL: Record<AcaoPendente['prioridade'], { label: string; clas
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function AcaoPendenteItem({ acao }: { acao: AcaoPendente }) {
+function AcaoPendenteItem({
+  acao,
+  pacienteId,
+  onAbrirModal,
+}: {
+  acao: AcaoPendente
+  pacienteId: string
+  onAbrirModal: (modo: AcaoModalModo, acao: AcaoPendente) => void
+}) {
+  const destino = resolverAcao(pacienteId, acao)
+
   return (
-    <div className={cn('flex gap-3 rounded-lg border-l-4 p-3 text-sm', PRIORIDADE_CLASS[acao.prioridade])}>
+    <div
+      className={cn(
+        'flex gap-3 rounded-lg border-l-4 p-3 text-sm transition-shadow',
+        'hover:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.07)]',
+        PRIORIDADE_CLASS[acao.prioridade],
+      )}
+    >
       <span className="mt-0.5 shrink-0 text-base">{TIPO_ICON[acao.tipo]}</span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -67,14 +93,39 @@ function AcaoPendenteItem({ acao }: { acao: AcaoPendente }) {
           </span>
         </div>
         <p className="mt-0.5 text-xs text-slate-600 leading-relaxed">{acao.descricao}</p>
-        {acao.prazo_dias > 0 && (
-          <p className="mt-1 text-[11px] text-slate-400">
-            ⏱ Realizar em até {acao.prazo_dias} dia{acao.prazo_dias !== 1 ? 's' : ''}
-          </p>
-        )}
-        {acao.prazo_dias === 0 && (
-          <p className="mt-1 text-[11px] font-semibold text-red-500">⏱ Realizar hoje</p>
-        )}
+
+        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+          {acao.prazo_dias > 0 ? (
+            <p className="text-[11px] text-slate-400">
+              ⏱ Realizar em até {acao.prazo_dias} dia{acao.prazo_dias !== 1 ? 's' : ''}
+            </p>
+          ) : (
+            <p className="text-[11px] font-semibold text-red-500">⏱ Realizar hoje</p>
+          )}
+          <Link
+            href={destino.href}
+            className="text-[11px] font-medium text-blue-700 opacity-70 hover:opacity-100 hover:underline"
+          >
+            {destino.cta}
+          </Link>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => onAbrirModal('executar', acao)}
+            className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+          >
+            ✅ Registrar execução
+          </button>
+          <button
+            type="button"
+            onClick={() => onAbrirModal('justificar', acao)}
+            className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          >
+            ⚠️ Justificar não execução
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -106,26 +157,40 @@ function StepCircle({ status, cor, num }: { status: StepStatus; cor: string; num
   }
 
   return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-slate-200 bg-white text-sm font-medium text-slate-400">
-      {num}
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-slate-200 bg-slate-50 text-slate-400"
+      title="Bloqueado — conclua a etapa anterior"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.83 0 1.5.67 1.5 1.5S12.83 14 12 14s-1.5-.67-1.5-1.5S11.17 11 12 11zm6-3h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z" />
+      </svg>
     </div>
   )
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function JornadaTimeline({ statusJornada, protocolo, onAvancarPasso, onAgendarConsulta, className }: JornadaTimelineProps) {
+export function JornadaTimeline({ statusJornada, protocolo, profissionalNome, onAvancarPasso, onAgendarConsulta, className }: JornadaTimelineProps) {
   const [expandido, setExpandido] = useState(true)
+  const [acoesResolvidas, setAcoesResolvidas] = useState<Set<string>>(() => new Set())
+  const [modalState, setModalState] = useState<{ modo: AcaoModalModo; acao: AcaoPendente } | null>(null)
   const {
+    paciente_id,
     passo_atual, percentual_conclusao, acoes_pendentes, acoes_concluidas,
     proximo_passo, status_controle, dias_no_passo_atual, alerta_estagnacao,
     data_prevista_avanco, alerta_estagnacao: estagnado,
   } = statusJornada
 
+  // Filtra ações já resolvidas localmente — UI otimista até o próximo refetch.
+  const acoesPendentesVisiveis = acoes_pendentes.filter(a => !acoesResolvidas.has(acaoKey(a)))
+
   const cor = protocolo.cor
   const totalPassos = protocolo.passos_fluxo.length
-  const podaAvancar = acoes_pendentes.filter(a => a.bloqueante).length === 0 && passo_atual < totalPassos
-  const metaAtingida = passo_atual >= totalPassos && acoes_pendentes.length === 0
+  const bloqueantesAtivos = acoesPendentesVisiveis.filter(a => a.bloqueante).length
+  const podaAvancar = bloqueantesAtivos === 0 && passo_atual < totalPassos
+  const metaAtingida = passo_atual >= totalPassos && acoesPendentesVisiveis.length === 0
+  const passoAtualInfo = protocolo.passos_fluxo.find(p => p.numero === passo_atual)
+  const tituloPassoAtual = passoAtualInfo?.titulo ?? `Passo ${passo_atual}`
 
   const statusCtrlCls = {
     controlado:   'bg-emerald-100 text-emerald-700',
@@ -248,21 +313,45 @@ export function JornadaTimeline({ statusJornada, protocolo, onAvancarPasso, onAg
                       )}
                     </div>
 
-                    {/* Step description (current and future only) */}
-                    {status !== 'done' && (
-                      <p className={cn('text-xs mt-0.5 leading-relaxed', status === 'future' ? 'text-slate-400' : 'text-slate-500')}>
+                    {/* Step description (current only — future shows lock message instead) */}
+                    {status === 'current' && (
+                      <p className="text-xs mt-0.5 leading-relaxed text-slate-500">
                         {passo.descricao}
                       </p>
                     )}
 
+                    {/* Future step: locked message */}
+                    {status === 'future' && (
+                      <div className="mt-0.5 space-y-1">
+                        <p className="text-xs leading-relaxed text-slate-400 line-clamp-2">
+                          {passo.descricao}
+                        </p>
+                        <p className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.83 0 1.5.67 1.5 1.5S12.83 14 12 14s-1.5-.67-1.5-1.5S11.17 11 12 11zm6-3h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z" />
+                          </svg>
+                          Bloqueado — conclua "{tituloPassoAtual}" primeiro
+                        </p>
+                      </div>
+                    )}
+
                     {/* Pending actions for current step */}
-                    {status === 'current' && acoes_pendentes.length > 0 && (
+                    {status === 'current' && acoesPendentesVisiveis.length > 0 && (
                       <div className="mt-3 space-y-2">
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                          Ações pendentes ({acoes_pendentes.length})
+                          Ações pendentes ({acoesPendentesVisiveis.length}) {bloqueantesAtivos > 0 && (
+                            <span className="text-red-500 normal-case font-medium">
+                              · {bloqueantesAtivos} bloqueante{bloqueantesAtivos > 1 ? 's' : ''} para avançar
+                            </span>
+                          )}
                         </p>
-                        {acoes_pendentes.map((acao, i) => (
-                          <AcaoPendenteItem key={i} acao={acao} />
+                        {acoesPendentesVisiveis.map((acao) => (
+                          <AcaoPendenteItem
+                            key={acaoKey(acao)}
+                            acao={acao}
+                            pacienteId={paciente_id}
+                            onAbrirModal={(modo, a) => setModalState({ modo, acao: a })}
+                          />
                         ))}
                       </div>
                     )}
@@ -276,8 +365,19 @@ export function JornadaTimeline({ statusJornada, protocolo, onAvancarPasso, onAg
                             className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-90"
                             style={{ backgroundColor: cor }}
                           >
-                            Avançar para "{proximo_passo}" →
+                            ✓ Concluir e avançar para "{proximo_passo}" →
                           </button>
+                        )}
+                        {!podaAvancar && bloqueantesAtivos > 0 && passo_atual < totalPassos && (
+                          <span
+                            className="flex items-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-400 cursor-not-allowed"
+                            title="Resolva os itens bloqueantes para liberar o próximo passo"
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 11c.83 0 1.5.67 1.5 1.5S12.83 14 12 14s-1.5-.67-1.5-1.5S11.17 11 12 11zm6-3h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6z" />
+                            </svg>
+                            Próximo passo bloqueado
+                          </span>
                         )}
                         {onAgendarConsulta && (
                           <button
@@ -291,7 +391,7 @@ export function JornadaTimeline({ statusJornada, protocolo, onAvancarPasso, onAg
                     )}
 
                     {/* All done for current step — no pending */}
-                    {status === 'current' && acoes_pendentes.length === 0 && !metaAtingida && (
+                    {status === 'current' && acoesPendentesVisiveis.length === 0 && !metaAtingida && (
                       <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600">
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -318,6 +418,24 @@ export function JornadaTimeline({ statusJornada, protocolo, onAvancarPasso, onAg
             </div>
           )}
         </div>
+      )}
+
+      {modalState && (
+        <AcaoExecucaoModal
+          aberto
+          modo={modalState.modo}
+          acao={modalState.acao}
+          pacienteId={paciente_id}
+          profissionalNomeDefault={profissionalNome ?? ''}
+          onFechar={() => setModalState(null)}
+          onConfirmado={() => {
+            setAcoesResolvidas(prev => {
+              const next = new Set(prev)
+              next.add(acaoKey(modalState.acao))
+              return next
+            })
+          }}
+        />
       )}
     </div>
   )

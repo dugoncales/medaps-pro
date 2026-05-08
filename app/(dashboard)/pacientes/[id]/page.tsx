@@ -143,6 +143,7 @@ function JornadaTab({
               key={j.protocolo}
               statusJornada={j}
               protocolo={proto}
+              profissionalNome={demoProfissional.nome}
               onAgendarConsulta={() => onAgendarConsulta(j.protocolo)}
             />
           )

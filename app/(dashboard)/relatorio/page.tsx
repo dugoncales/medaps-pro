@@ -12,6 +12,8 @@ import { MetricCard } from '@/components/shared/MetricCard'
 import { ProgressoProtocolo } from '@/components/shared/ProgressoProtocolo'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { IAPopulacionalPanel, type PromptIAPopulacional } from '@/components/ia/IAPopulacionalPanel'
+import { PROTOCOLO_MAP } from '@/lib/protocolos'
 
 type Periodo = 'mensal' | 'trimestral' | 'anual'
 
@@ -101,6 +103,35 @@ export default function RelatorioPage() {
     [linhas],
   )
 
+  const entradaIA = useMemo<PromptIAPopulacional>(() => {
+    const protocolos = PROTOCOLO_BARS.map(p => {
+      const ativos = linhas.filter(l => l.protocolo_codigo === p.codigo && l.status === 'ativo')
+      return {
+        codigo: p.codigo,
+        nome: PROTOCOLO_MAP.get(p.codigo)?.nome ?? p.nome,
+        total_ativos: ativos.length,
+        controlados_pct: calcProtocoloPct(linhas, p.codigo),
+      }
+    }).filter(p => p.total_ativos > 0)
+
+    return {
+      empresa: { nome: empresa.nome, total_colaboradores: empresa.total_colaboradores },
+      periodo,
+      indicadores: indicadores.map(i => ({
+        competencia: i.competencia,
+        total_pacientes: i.total_pacientes,
+        taxa_controle_geral: i.taxa_controle_geral,
+        has_controlados_pct: i.has_controlados_pct,
+        dm_controlados_pct: i.dm_controlados_pct,
+        tab_cessacao_pct: i.tab_cessacao_pct,
+        roi_estimado: i.roi_estimado,
+      })),
+      protocolos,
+    }
+  }, [empresa, periodo, indicadores, linhas])
+
+  const cacheKeyIA = `${empresa.id ?? 'demo'}:${periodo}:${indicadores.length}:${linhas.length}`
+
   // Série temporal para gráfico de evolução
   const tendenciaData = indicadores.map((ind, i) => ({
     mes: ind.competencia
@@ -178,6 +209,15 @@ export default function RelatorioPage() {
 
       {/* Conteúdo do relatório (capturado para PDF) */}
       <div ref={reportRef} className="space-y-6">
+        {/* Sumário executivo IA — compacto, no topo */}
+        <IAPopulacionalPanel
+          cacheKey={cacheKeyIA}
+          entrada={entradaIA}
+          modo="sumario"
+          autoCarregar
+          titulo="Sumário Executivo"
+        />
+
         {/* KPI grandes */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <MetricCard
@@ -257,6 +297,14 @@ export default function RelatorioPage() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+
+        {/* Análise populacional IA — completa */}
+        <IAPopulacionalPanel
+          cacheKey={cacheKeyIA}
+          entrada={entradaIA}
+          modo="analise"
+          titulo="Análise Populacional"
+        />
 
         {/* Impacto econômico */}
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { renderMarkdownSafe } from '@/lib/markdown-safe'
 
 export interface PromptIAEntrada {
   paciente?: {
@@ -35,77 +36,6 @@ interface Props {
 }
 
 const STORAGE_PREFIX = 'medaps:ia-clinica:'
-
-// ─── Sanitização + render de markdown ─────────────────────────────────────────
-// Implementação intencionalmente mínima — escapa HTML primeiro, então converte
-// o subset de markdown que o prompt instrui o modelo a usar (h2, listas, bold).
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-function renderMarkdownSafe(md: string): string {
-  const escaped = escapeHtml(md)
-  const linhas = escaped.split('\n')
-  const out: string[] = []
-  let emLista = false
-
-  const flushLista = () => {
-    if (emLista) {
-      out.push('</ul>')
-      emLista = false
-    }
-  }
-
-  for (const raw of linhas) {
-    const linha = raw.trim()
-
-    if (!linha) {
-      flushLista()
-      continue
-    }
-
-    const h2 = linha.match(/^## (.+)$/)
-    if (h2) {
-      flushLista()
-      out.push(
-        `<h3 class="mt-4 mb-1.5 text-sm font-bold text-[#1E40AF] uppercase tracking-wide">${h2[1]}</h3>`,
-      )
-      continue
-    }
-
-    const item = linha.match(/^[-*] (.+)$/)
-    if (item) {
-      if (!emLista) {
-        out.push('<ul class="list-disc pl-5 space-y-1 text-sm text-slate-700">')
-        emLista = true
-      }
-      out.push(`<li>${aplicarInline(item[1])}</li>`)
-      continue
-    }
-
-    flushLista()
-    out.push(`<p class="text-sm text-slate-700 leading-relaxed">${aplicarInline(linha)}</p>`)
-  }
-
-  flushLista()
-  return out.join('\n')
-}
-
-function aplicarInline(s: string): string {
-  // **bold** → <strong>; *italic* → <em>; `code` → <code>
-  return s
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code class="rounded bg-slate-100 px-1 text-xs font-mono">$1</code>')
-}
-
-// ─── Componente ───────────────────────────────────────────────────────────────
 
 export function IAClinicalPanel({ pacienteId, entrada, iniciarAberto = false }: Props) {
   const [aberto, setAberto] = useState(iniciarAberto)

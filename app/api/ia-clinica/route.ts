@@ -1,10 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Atenção: a API REST do Gemini usa o header `x-goog-api-key`, não
-// `Authorization: Bearer`. Bearer só funciona com OAuth/Service Account,
-// que não é o caso da API key gerada no AI Studio.
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+// API Gemini REST aceita a key como query param `?key=` — é a forma
+// canônica para keys do AI Studio. Header `x-goog-api-key` também
+// funciona, mas algumas rotas/edge regions retornam 404 silencioso, então
+// padronizamos no query param para ter um único caminho de auth.
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+const GEMINI_MODEL_PRIMARY = 'gemini-1.5-flash'
+const GEMINI_MODEL_FALLBACK = 'gemini-1.5-flash-latest'
+
+function buildUrl(model: string, apiKey: string): string {
+  return `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`
+}
 
 const SYSTEM_PROMPT = `Você é um consultor clínico especializado em Medicina do Trabalho e Atenção Primária à Saúde (APS) corporativa, atuando como apoio à decisão para o profissional médico do MedAPS Pro.
 
@@ -139,24 +145,37 @@ export async function POST(request: NextRequest) {
 
   const userPrompt = montarPrompt(body)
 
-  try {
-    const upstream = await fetch(GEMINI_URL, {
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.4,
+      topP: 0.9,
+      maxOutputTokens: 1024,
+    },
+  })
+
+  async function callGemini(model: string) {
+    return fetch(buildUrl(model, apiKey!), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        generationConfig: {
-          temperature: 0.4,
-          topP: 0.9,
-          maxOutputTokens: 1024,
-        },
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
       signal: AbortSignal.timeout(30_000),
     })
+  }
+
+  try {
+    let upstream = await callGemini(GEMINI_MODEL_PRIMARY)
+    console.log('[Gemini] status:', upstream.status)
+
+    // Modelos do Gemini são versionados — quando o Google promove o snapshot,
+    // o alias estável (gemini-1.5-flash) pode retornar 404 enquanto o `-latest`
+    // continua funcionando. Tenta o fallback uma única vez nesse caso.
+    if (upstream.status === 404) {
+      console.warn('[Gemini] 404 no modelo primário; tentando fallback', GEMINI_MODEL_FALLBACK)
+      upstream = await callGemini(GEMINI_MODEL_FALLBACK)
+      console.log('[Gemini] status (fallback):', upstream.status)
+    }
 
     if (!upstream.ok) {
       const detalhes = await upstream.text().catch(() => '')
