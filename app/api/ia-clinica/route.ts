@@ -5,8 +5,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 // funciona, mas algumas rotas/edge regions retornam 404 silencioso, então
 // padronizamos no query param para ter um único caminho de auth.
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
-const GEMINI_MODEL_PRIMARY = 'gemini-1.5-flash'
-const GEMINI_MODEL_FALLBACK = 'gemini-1.5-flash-latest'
+// Gemini 1.5 foi descontinuado pelo Google — passamos para 2.0 Flash.
+const GEMINI_MODEL_PRIMARY = 'gemini-2.0-flash'
+const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash-lite'
 
 function buildUrl(model: string, apiKey: string): string {
   return `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`

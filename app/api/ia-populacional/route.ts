@@ -1,8 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-// API REST do Gemini usa header `x-goog-api-key`, não Bearer.
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+// API key vai como `?key=` (mesmo padrão do ia-clinica). Modelo 2.0 — 1.5 foi
+// descontinuado pelo Google.
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+const GEMINI_MODEL_PRIMARY = 'gemini-2.0-flash'
+const GEMINI_MODEL_FALLBACK = 'gemini-2.0-flash-lite'
+
+function buildUrl(model: string, apiKey: string): string {
+  return `${GEMINI_BASE}/${model}:generateContent?key=${apiKey}`
+}
 
 const SYSTEM_PROMPT_ANALISE = `Você é um epidemiologista e gestor de saúde populacional especializado em APS empresarial, atuando como consultor estratégico para o time clínico do MedAPS Pro.
 
@@ -157,24 +163,34 @@ export async function POST(request: NextRequest) {
   const systemPrompt = modo === 'sumario' ? SYSTEM_PROMPT_SUMARIO : SYSTEM_PROMPT_ANALISE
   const userPrompt = montarPrompt(body)
 
-  try {
-    const upstream = await fetch(GEMINI_URL, {
+  const payload = JSON.stringify({
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.3,
+      topP: 0.9,
+      maxOutputTokens: modo === 'sumario' ? 320 : 1024,
+    },
+  })
+
+  async function callGemini(model: string) {
+    return fetch(buildUrl(model, apiKey!), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          topP: 0.9,
-          maxOutputTokens: modo === 'sumario' ? 320 : 1024,
-        },
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
       signal: AbortSignal.timeout(30_000),
     })
+  }
+
+  try {
+    let upstream = await callGemini(GEMINI_MODEL_PRIMARY)
+    console.log('[Gemini] status:', upstream.status)
+
+    if (upstream.status === 404) {
+      console.warn('[Gemini] 404 no modelo primário; tentando fallback', GEMINI_MODEL_FALLBACK)
+      upstream = await callGemini(GEMINI_MODEL_FALLBACK)
+      console.log('[Gemini] status (fallback):', upstream.status)
+    }
 
     if (!upstream.ok) {
       const detalhes = await upstream.text().catch(() => '')
