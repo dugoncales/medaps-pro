@@ -95,34 +95,30 @@ function AgendarConsultaModalInner({
 
       if (!IS_DEMO_MODE) {
         const supabase = createClient()
-        // Pegamos só o id após o INSERT — quanto menos colunas o select
-        // retorna, menor a chance da RLS pós-insert falhar com 400. O
-        // resto do agendamento já está em memória (acabamos de gravá-lo)
-        // e o realtime channel da agenda repuxa a row completa.
-        const dataHoraIso = dt.toISOString()
-        const agora = new Date().toISOString()
-        const { data, error } = await supabase
+        // Sem .select() pós-insert: o select dispara uma segunda checagem
+        // de RLS contra a row recém-gravada e estava retornando 400. O
+        // realtime channel da agenda repuxa a row completa quando o
+        // dashboard precisar — o id local serve só para UI otimista.
+        const { error } = await supabase
           .from('agendamentos')
           .insert({
             paciente_id: pacienteId,
             profissional_id: profissionalId ?? null,
-            data_hora: dataHoraIso,
+            data_hora: dt.toISOString(),
             tipo,
             protocolos_previstos: protocolosSelecionados,
             status: 'agendado',
           })
-          .select('id')
-          .single()
         if (error) throw error
         agendamento = {
-          id: (data as { id: string }).id,
+          id: `ag-${Date.now()}`,
           paciente_id: pacienteId,
-          profissional_id: profissionalId,
-          data_hora: dataHoraIso,
+          profissional_id: profissionalId ?? undefined,
+          data_hora: dt.toISOString(),
           tipo,
           protocolos_previstos: protocolosSelecionados,
           status: 'agendado',
-          created_at: agora,
+          created_at: new Date().toISOString(),
           paciente: { nome: pacienteNome, matricula: '', setor: '' },
         }
       } else {
