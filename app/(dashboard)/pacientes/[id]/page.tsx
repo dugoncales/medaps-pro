@@ -324,7 +324,10 @@ export default function PacientePage() {
   useEffect(() => {
     if (!id) return
     setJornadasCarregando(true)
-    const linhasAtivas = [...demoLinhas, ...linhasRuntime, ...supabaseLinhas].filter(l => l.paciente_id === id && l.status === 'ativo')
+    const linhasAtivas = (supabaseLinhas.length > 0
+      ? [...supabaseLinhas, ...linhasRuntime]
+      : [...demoLinhas, ...linhasRuntime]
+    ).filter(l => l.paciente_id === id && l.status === 'ativo')
     const historicoConsultas = demoConsultas.filter(c => c.paciente_id === id)
     const historicoExames = getExamesByPaciente(id)
 
