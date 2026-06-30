@@ -30,7 +30,7 @@ function escolherEscala(protocolos: string[]): { codigo: string; nome: string } 
   for (const p of ordenados) {
     const codigo = PROTOCOLO_ESCALA_MAP[p]
     if (!codigo) continue
-    const escala = ESCALAS.find(e => e.codigo === codigo)
+    const escala = Object.values(ESCALAS).find(e => e.codigo === codigo)
     if (escala) return { codigo, nome: escala.nome }
   }
   return null
