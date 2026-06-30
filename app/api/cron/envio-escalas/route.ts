@@ -102,7 +102,8 @@ export async function GET(request: Request) {
     if (!escala) return []
 
     const token = gerarToken()
-    const empresaId = (ag.pacientes as { empresa_id: string } | null)?.empresa_id ?? null
+    const pac = Array.isArray(ag.pacientes) ? ag.pacientes[0] : ag.pacientes
+    const empresaId = (pac as { empresa_id: string } | null)?.empresa_id ?? null
 
     return [{
       empresa_id:     empresaId,
