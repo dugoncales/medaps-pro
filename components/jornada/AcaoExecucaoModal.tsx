@@ -759,7 +759,7 @@ function AcaoExecucaoModalInner({
             </div>
           )}
 
-          {ehExecutar && tipo !== 'retorno' && (
+          {ehExecutar && !ehHAS && tipo !== 'retorno' && (
             <>
               <div className="space-y-1.5">
                 <Label htmlFor="acao-data">Data de execução</Label>
